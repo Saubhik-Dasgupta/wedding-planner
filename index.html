@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Saubhik &amp; Tanuka — Wedding Secretary</title>
+<meta name="theme-color" content="#1B2A3D">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<style>
+  :root{
+    --ink:#1B2A3D;
+    --ink-2:#233850;
+    --gold:#C9A15F;
+    --gold-soft:#E4CFA0;
+    --maroon:#7A2333;
+    --sage:#4C6B63;
+    --ivory:#FAF7F2;
+    --paper:#FFFFFF;
+    --line:#E7E1D6;
+    --text:#2B2B28;
+    --text-soft:#6B6459;
+    --danger:#B3432A;
+    --radius:14px;
+    --shadow: 0 1px 2px rgba(27,42,61,.06), 0 6px 20px rgba(27,42,61,.08);
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:var(--ivory);
+    color:var(--text);
+    font-family:'Inter',system-ui,sans-serif;
+    -webkit-font-smoothing:antialiased;
+    padding-bottom:76px;
+  }
+  h1,h2,h3,.serif{ font-family:'Fraunces',serif; }
+  @media (prefers-reduced-motion: reduce){
+    *{ animation:none !important; transition:none !important; }
+  }
+
+  /* ---------- Header / Hero ---------- */
+  .hero{
+    background:linear-gradient(160deg,var(--ink) 0%, var(--ink-2) 100%);
+    color:var(--ivory);
+    padding:28px 20px 26px;
+    border-radius:0 0 26px 26px;
+  }
+  .hero-names{ font-size:15px; letter-spacing:.04em; color:var(--gold-soft); margin:0 0 4px; }
+  .hero-count{ display:flex; align-items:baseline; gap:10px; margin:6px 0 2px; }
+  .hero-count .num{ font-size:52px; font-weight:600; line-height:1; }
+  .hero-count .unit{ font-size:16px; color:var(--gold-soft); }
+  .hero-sub{ font-size:13.5px; color:#C9D2DE; margin:0; }
+  .hero-dates{ display:flex; gap:18px; margin-top:14px; font-size:12.5px; color:#B9C3D1; flex-wrap:wrap; }
+  .hero-dates b{ color:var(--ivory); font-weight:600; }
+
+  /* ---------- Layout ---------- */
+  .container{ max-width:640px; margin:0 auto; padding:16px; }
+  .view{ display:none; animation:fadeIn .18s ease; }
+  .view.active{ display:block; }
+  @keyframes fadeIn{ from{opacity:0; transform:translateY(4px);} to{opacity:1; transform:none;} }
+
+  /* ---------- Cards / Stats ---------- */
+  .stat-grid{ display:grid; grid-template-columns:repeat(2,1fr); gap:10px; margin-top:14px; }
+  .stat-card{
+    background:var(--paper); border-radius:var(--radius); padding:14px 16px;
+    box-shadow:var(--shadow); border:1px solid var(--line);
+  }
+  .stat-card .label{ font-size:11.5px; text-transform:uppercase; letter-spacing:.05em; color:var(--text-soft); margin-bottom:6px; }
+  .stat-card .value{ font-family:'Fraunces',serif; font-size:24px; font-weight:600; color:var(--ink); }
+  .stat-card .sub{ font-size:12px; color:var(--text-soft); margin-top:2px; }
+
+  .section-title{ font-size:13px; text-transform:uppercase; letter-spacing:.06em; color:var(--text-soft); margin:22px 2px 10px; }
+
+  .alert{
+    display:flex; gap:10px; align-items:flex-start; background:#FFF3EC; border:1px solid #F0D2BE;
+    border-radius:12px; padding:12px 14px; margin-bottom:8px; font-size:13.5px; color:#7A3E1F; cursor:pointer;
+  }
+  .alert.empty{ background:var(--paper); border-color:var(--line); color:var(--text-soft); cursor:default; }
+
+  /* ---------- List items ---------- */
+  .list{ display:flex; flex-direction:column; gap:8px; }
+  .item{
+    background:var(--paper); border:1px solid var(--line); border-radius:var(--radius);
+    padding:13px 14px; box-shadow:var(--shadow); cursor:pointer;
+  }
+  .item-top{ display:flex; justify-content:space-between; align-items:flex-start; gap:10px; }
+  .item-title{ font-weight:600; font-size:15px; color:var(--ink); }
+  .item-meta{ font-size:12.5px; color:var(--text-soft); margin-top:4px; }
+  .badge{ font-size:11px; padding:3px 9px; border-radius:99px; font-weight:600; white-space:nowrap; }
+  .badge.pending{ background:#EFE6D4; color:#8A6A2E; }
+  .badge.progress{ background:#E1E9F5; color:#3A5A8A; }
+  .badge.done{ background:#E1EEE6; color:#2E6B4A; }
+  .badge.overdue{ background:#F7DEDA; color:var(--danger); }
+  .badge.confirmed{ background:#E1EEE6; color:#2E6B4A; }
+  .badge.declined{ background:#F0E4E4; color:#8A3A3A; }
+  .priority-dot{ width:8px; height:8px; border-radius:50%; display:inline-block; margin-right:6px; }
+  .p-low{ background:#B7C4CC; } .p-medium{ background:var(--gold); } .p-high{ background:#D98A3D; } .p-critical{ background:var(--danger); }
+
+  .empty-state{ text-align:center; padding:40px 20px; color:var(--text-soft); }
+  .empty-state .serif{ font-size:19px; color:var(--ink); margin-bottom:6px; }
+
+  /* ---------- Buttons ---------- */
+  .btn{
+    border:none; border-radius:10px; padding:10px 16px; font-size:14px; font-weight:600;
+    cursor:pointer; font-family:'Inter',sans-serif;
+  }
+  .btn-primary{ background:var(--ink); color:var(--ivory); }
+  .btn-primary:active{ background:var(--ink-2); }
+  .btn-ghost{ background:transparent; color:var(--ink); border:1px solid var(--line); }
+  .btn-danger{ background:transparent; color:var(--danger); border:1px solid #F0D2CA; }
+  .fab{
+    position:fixed; right:18px; bottom:88px; width:52px; height:52px; border-radius:50%;
+    background:var(--gold); color:var(--ink); font-size:26px; display:flex; align-items:center; justify-content:center;
+    box-shadow:0 6px 18px rgba(201,161,95,.5); border:none; cursor:pointer; z-index:20;
+  }
+
+  /* ---------- Bottom nav ---------- */
+  .bottom-nav{
+    position:fixed; bottom:0; left:0; right:0; background:var(--paper); border-top:1px solid var(--line);
+    display:flex; justify-content:space-around; padding:8px 4px 10px; z-index:30;
+  }
+  .nav-btn{ background:none; border:none; display:flex; flex-direction:column; align-items:center; gap:3px;
+    color:var(--text-soft); font-size:10.5px; font-family:'Inter',sans-serif; padding:4px 6px; cursor:pointer; }
+  .nav-btn.active{ color:var(--ink); }
+  .nav-icon{ width:22px; height:22px; }
+
+  /* ---------- Modal / Sheet ---------- */
+  .sheet-backdrop{
+    position:fixed; inset:0; background:rgba(27,42,61,.45); display:none; align-items:flex-end; z-index:50;
+  }
+  .sheet-backdrop.active{ display:flex; }
+  .sheet{
+    background:var(--paper); width:100%; max-height:88vh; overflow-y:auto; border-radius:20px 20px 0 0;
+    padding:18px 20px 26px; animation:slideUp .2s ease;
+  }
+  @keyframes slideUp{ from{transform:translateY(24px); opacity:.6;} to{transform:none; opacity:1;} }
+  .sheet-handle{ width:36px; height:4px; background:var(--line); border-radius:2px; margin:0 auto 14px; }
+  .sheet h3{ margin:0 0 14px; font-size:19px; }
+  .field{ margin-bottom:12px; }
+  .field label{ display:block; font-size:12.5px; color:var(--text-soft); margin-bottom:5px; font-weight:600; }
+  .field input, .field select, .field textarea{
+    width:100%; padding:10px 12px; border:1px solid var(--line); border-radius:9px; font-size:14.5px;
+    font-family:'Inter',sans-serif; background:#FCFBF8; color:var(--text);
+  }
+  .field textarea{ resize:vertical; min-height:60px; }
+  .field-row{ display:flex; gap:10px; }
+  .field-row .field{ flex:1; }
+  .sheet-actions{ display:flex; gap:10px; margin-top:18px; }
+  .sheet-actions .btn{ flex:1; }
+
+  .toast{
+    position:fixed; bottom:88px; left:50%; transform:translateX(-50%); background:var(--ink); color:var(--ivory);
+    padding:10px 18px; border-radius:10px; font-size:13.5px; z-index:60; opacity:0; pointer-events:none;
+    transition:opacity .2s ease, transform .2s ease;
+  }
+  .toast.show{ opacity:1; transform:translateX(-50%) translateY(-4px); }
+
+  .segmented{ display:flex; gap:6px; margin-bottom:14px; overflow-x:auto; padding-bottom:2px; }
+  .seg-btn{
+    flex:none; padding:7px 13px; border-radius:99px; border:1px solid var(--line); background:var(--paper);
+    font-size:12.5px; color:var(--text-soft); cursor:pointer; font-family:'Inter',sans-serif;
+  }
+  .seg-btn.active{ background:var(--ink); border-color:var(--ink); color:var(--ivory); }
+
+  .vendor-money{ display:flex; justify-content:space-between; margin-top:8px; font-size:12.5px; }
+  .vendor-money div b{ display:block; color:var(--ink); font-size:14px; font-family:'Fraunces',serif; }
+
+  .settings-row{ background:var(--paper); border:1px solid var(--line); border-radius:12px; padding:14px 16px; margin-bottom:10px; }
+  .settings-row .label{ font-size:12px; color:var(--text-soft); margin-bottom:2px; }
+
+  /* ---------- Login screen ---------- */
+  #loginScreen{
+    position:fixed; inset:0; background:linear-gradient(160deg,var(--ink) 0%, var(--ink-2) 100%);
+    z-index:100; display:flex; align-items:center; justify-content:center; padding:24px;
+  }
+  #loginScreen.hidden{ display:none; }
+  .login-card{ width:100%; max-width:340px; }
+  .login-card .brand{ color:var(--gold-soft); font-size:14px; letter-spacing:.04em; margin-bottom:4px; }
+  .login-card h1{ color:var(--ivory); font-size:26px; margin:0 0 22px; }
+  .login-card .field label{ color:#C9D2DE; }
+  .login-card .field input{ background:rgba(255,255,255,.06); border-color:rgba(255,255,255,.18); color:var(--ivory); }
+  .login-card .field input::placeholder{ color:#8593A6; }
+  .login-error{ color:#F0A78A; font-size:13px; margin-top:4px; min-height:16px; }
+  #syncStatus{ position:fixed; top:10px; right:10px; font-size:11px; padding:4px 10px; border-radius:99px; z-index:40;
+    background:rgba(27,42,61,.85); color:var(--gold-soft); display:none; }
+  #syncStatus.show{ display:block; }
+</style>
+</head>
+<body>
+
+<div id="loginScreen">
+  <div class="login-card">
+    <p class="brand serif">Wedding Secretary</p>
+    <h1 class="serif">Sign in</h1>
+    <div class="field"><label>Email</label><input type="email" id="login_email" autocomplete="username" placeholder="you@example.com"></div>
+    <div class="field"><label>Password</label><input type="password" id="login_password" autocomplete="current-password" placeholder="••••••••"></div>
+    <div class="login-error" id="loginError"></div>
+    <button class="btn btn-primary" id="loginBtn" style="width:100%;margin-top:6px;">Sign in</button>
+  </div>
+</div>
+
+<div id="syncStatus">Syncing…</div>
+
+<div class="hero">
+  <p class="hero-names serif">Saubhik &amp; Tanuka</p>
+  <div class="hero-count">
+    <span class="num" id="countdownNum">—</span>
+    <span class="unit">days to go</span>
+  </div>
+  <p class="hero-sub" id="weddingDateLine">until 14 March 2027</p>
+  <div class="hero-dates">
+    <span>Reception — <b id="receptionDateLine">17 March 2027</b></span>
+  </div>
+</div>
+
+<div class="container">
+
+  <!-- DASHBOARD -->
+  <div class="view active" id="view-dashboard">
+    <div class="section-title">Needs attention</div>
+    <div id="alertsBox"></div>
+
+    <div class="section-title">Budget</div>
+    <div class="stat-grid">
+      <div class="stat-card"><div class="label">Contracted</div><div class="value" id="statContracted">₹0</div></div>
+      <div class="stat-card"><div class="label">Paid</div><div class="value" id="statPaid">₹0</div></div>
+      <div class="stat-card"><div class="label">Remaining</div><div class="value" id="statRemaining">₹0</div></div>
+      <div class="stat-card"><div class="label">Vendors</div><div class="value" id="statVendorCount">0</div></div>
+    </div>
+
+    <div class="section-title">Guests</div>
+    <div class="stat-grid">
+      <div class="stat-card"><div class="label">Total</div><div class="value" id="statGuestTotal">0</div><div class="sub" id="statGuestPeople"></div></div>
+      <div class="stat-card"><div class="label">Confirmed</div><div class="value" id="statGuestConfirmed">0</div></div>
+      <div class="stat-card"><div class="label">Pending</div><div class="value" id="statGuestPending">0</div></div>
+      <div class="stat-card"><div class="label">Declined</div><div class="value" id="statGuestDeclined">0</div></div>
+    </div>
+
+    <div class="section-title">Tasks</div>
+    <div class="stat-grid">
+      <div class="stat-card"><div class="label">Open</div><div class="value" id="statTaskOpen">0</div></div>
+      <div class="stat-card"><div class="label">Overdue</div><div class="value" id="statTaskOverdue">0</div></div>
+      <div class="stat-card"><div class="label">Completed</div><div class="value" id="statTaskDone">0</div></div>
+      <div class="stat-card"><div class="label">Total</div><div class="value" id="statTaskTotal">0</div></div>
+    </div>
+  </div>
+
+  <!-- TASKS -->
+  <div class="view" id="view-tasks">
+    <div class="segmented" id="taskFilter">
+      <button class="seg-btn active" data-f="all">All</button>
+      <button class="seg-btn" data-f="pending">Pending</button>
+      <button class="seg-btn" data-f="progress">In Progress</button>
+      <button class="seg-btn" data-f="overdue">Overdue</button>
+      <button class="seg-btn" data-f="done">Completed</button>
+    </div>
+    <div class="list" id="taskList"></div>
+  </div>
+
+  <!-- VENDORS -->
+  <div class="view" id="view-vendors">
+    <div class="list" id="vendorList"></div>
+  </div>
+
+  <!-- FINANCE -->
+  <div class="view" id="view-finance">
+    <div class="section-title">Overview</div>
+    <div class="stat-grid">
+      <div class="stat-card"><div class="label">Contracted</div><div class="value" id="finContracted">₹0</div></div>
+      <div class="stat-card"><div class="label">Paid</div><div class="value" id="finPaid">₹0</div></div>
+      <div class="stat-card"><div class="label">Remaining</div><div class="value" id="finRemaining">₹0</div></div>
+      <div class="stat-card"><div class="label">Other expenses</div><div class="value" id="finOtherTotal">₹0</div></div>
+    </div>
+    <div class="section-title">By vendor</div>
+    <div class="list" id="financeVendorList"></div>
+    <div class="section-title">Other expenses (not vendor-linked)</div>
+    <div class="list" id="otherExpenseList"></div>
+  </div>
+
+  <!-- GUESTS -->
+  <div class="view" id="view-guests">
+    <button class="btn btn-ghost" id="importGuestsBtn" style="width:100%;margin-bottom:10px;">Import from Excel/CSV</button>
+    <div class="segmented" id="guestFilter">
+      <button class="seg-btn active" data-f="all">All</button>
+      <button class="seg-btn" data-f="confirmed">Confirmed</button>
+      <button class="seg-btn" data-f="pending">Pending</button>
+      <button class="seg-btn" data-f="declined">Declined</button>
+      <button class="seg-btn" data-f="full">Full Wedding</button>
+      <button class="seg-btn" data-f="reception">Reception Only</button>
+    </div>
+    <div class="list" id="guestList"></div>
+  </div>
+
+  <!-- SETTINGS -->
+  <div class="view" id="view-settings">
+    <div class="section-title">Wedding details</div>
+    <div class="settings-row">
+      <div class="label">Wedding date</div>
+      <input type="date" id="settingWeddingDate" style="border:none;font-size:15px;font-family:'Fraunces',serif;background:transparent;width:100%;">
+    </div>
+    <div class="settings-row">
+      <div class="label">Reception date</div>
+      <input type="date" id="settingReceptionDate" style="border:none;font-size:15px;font-family:'Fraunces',serif;background:transparent;width:100%;">
+    </div>
+    <button class="btn btn-primary" id="saveSettingsBtn" style="width:100%;margin-top:6px;">Save</button>
+
+    <div class="section-title">Account</div>
+    <div class="settings-row">
+      <div class="label">Signed in as</div>
+      <div id="accountEmail" style="font-size:15px;font-family:'Fraunces',serif;">—</div>
+    </div>
+    <button class="btn btn-ghost" id="signOutBtn" style="width:100%;margin-bottom:8px;">Sign out</button>
+
+    <div class="section-title">Data</div>
+    <button class="btn btn-ghost" id="exportBtn" style="width:100%;margin-bottom:8px;">Export backup (.json)</button>
+    <label class="btn btn-ghost" style="width:100%;display:block;text-align:center;margin-bottom:8px;">
+      Import backup (.json)
+      <input type="file" id="importInput" accept="application/json" style="display:none;">
+    </label>
+    <button class="btn btn-danger" id="resetBtn" style="width:100%;">Erase all data</button>
+
+    <div class="section-title">About</div>
+    <p style="font-size:13px;color:var(--text-soft);line-height:1.6;">
+      Your data syncs automatically to your private Firebase cloud database, so it's the same on every device you sign into.
+      It also works offline — changes made without a connection sync as soon as you're back online.
+      Export still makes a local backup file you can keep for safekeeping.
+    </p>
+  </div>
+
+</div>
+
+<button class="fab" id="fabAdd">+</button>
+
+<div class="bottom-nav">
+  <button class="nav-btn active" data-view="dashboard">
+    <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>
+    Home
+  </button>
+  <button class="nav-btn" data-view="tasks">
+    <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 11l2 2 4-4"/><rect x="3" y="4" width="18" height="17" rx="2.5"/></svg>
+    Tasks
+  </button>
+  <button class="nav-btn" data-view="vendors">
+    <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 21V9l9-6 9 6v12"/><path d="M9 21v-6h6v6"/></svg>
+    Vendors
+  </button>
+  <button class="nav-btn" data-view="finance">
+    <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 7v10M9 9.5c0-1.5 1.3-2 3-2s3 .8 3 2-1.3 2-3 2-3 .5-3 2 1.3 2 3 2 3-.5 3-2"/></svg>
+    Finance
+  </button>
+  <button class="nav-btn" data-view="guests">
+    <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="9" cy="8" r="3"/><path d="M2 20c0-3.3 3.1-6 7-6s7 2.7 7 6"/><circle cx="17" cy="9" r="2.3"/><path d="M16 14.2c2.7.4 4.5 2.4 4.5 5.3"/></svg>
+    Guests
+  </button>
+  <button class="nav-btn" data-view="settings">
+    <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 13a7.6 7.6 0 000-2l2-1.5-2-3.5-2.4.6a7.9 7.9 0 00-1.7-1L15 3h-6l-.3 2.6a7.9 7.9 0 00-1.7 1l-2.4-.6-2 3.5L4.6 11a7.6 7.6 0 000 2l-2 1.5 2 3.5 2.4-.6a7.9 7.9 0 001.7 1L9 21h6l.3-2.6a7.9 7.9 0 001.7-1l2.4.6 2-3.5-2-1.5z"/></svg>
+    Settings
+  </button>
+</div>
+
+<div class="sheet-backdrop" id="sheetBackdrop">
+  <div class="sheet" id="sheetContent"></div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>

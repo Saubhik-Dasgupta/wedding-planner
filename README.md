@@ -90,75 +90,63 @@ One small tradeoff: because uploads happen straight from the browser without a s
 
 # Part B — How to use the app
 
-## Signing in and setting up your profile
+## Signing in
 
-The first time you open the app, you'll see a **Sign in** screen — enter the email and password created for you in step A2. There's no "forgot password" self-service link in this simple version; if you ever get locked out, reset it from the Firebase console under Authentication → Users.
-
-Right after your first sign-in, you'll be asked **"Who's this?"** with buttons for each name on file (Saubhik / Tanuka by default). Tap your own name. This is important — it's how the app knows what belongs to you, especially for the Finance sharing feature below. You only do this once per device; if you ever need to redo it (e.g. you tapped the wrong name), go to **Settings → Your profile → Change profile**.
+Enter the email and password created for you in step A2. There's no "who are you" screen anymore — the app knows who you are from your login itself, and automatically tracks what you've added versus what's shared with you. If you're ever locked out, reset your password from the Firebase console under Authentication → Users.
 
 ## The five main tabs (bottom of the screen)
 
-### 🏠 Home (Dashboard)
+### 🏠 Home
 
-This is the first thing you see — your wedding countdown, upcoming events, and a live snapshot of budget, guests, and tasks.
+This splits into two swipeable panels at the top:
 
-- **Needs attention** — anything urgent: overdue tasks, vendor payments coming due, guests who haven't RSVP'd close to the date. Tap any alert to jump straight to it.
-- **Your events** — every event you've added in Settings (Haldi, Wedding, Reception, etc.), showing the date, time, venue, and how many guests are expected at that specific event.
-- **Budget** — the big number is what's left to pay, followed by Contracted / Paid / Planned. This only counts vendors *you* can see the finances for (more on that below).
-- **Guests** and **Tasks** — quick totals.
+- **🎉 Celebrations** — a decorated view of every wedding function (Haldi, Wedding, Sangeet, Vidaai, Reception, whatever you've set up), each showing its date, time, venue, address, and how many guests are expected — pulled automatically from your guest list. The main Wedding-day event also shows how many guests are staying for Bashor Raat.
+- **📊 Overview** — the countdown, budget snapshot, guest totals, and task totals — the numbers-focused view.
 
 ### ✅ Tasks
 
-Your wedding to-do list.
+Shared between everyone with access — your joint wedding to-do list.
 
-- Tap the **circle** on the left of any task to mark it done instantly — no need to open anything.
-- Tap the task itself (not the circle) to edit details: title, priority, due date, linked vendor, notes.
-- Use the filter chips at the top (All / Pending / In Progress / Overdue / Completed) to narrow the list.
-- The **+** button (bottom right) adds a new task.
+- Tap the **circle** to mark a task done instantly.
+- Tap the task itself to edit title, priority, due date, linked vendor, notes.
+- Filter chips at the top narrow by status.
 
 ### 🏛 Vendors
 
-Every vendor you're working with — photographer, caterer, venue, etc.
+Private by default — vendors you add are visible only to you until you explicitly share them.
 
-- Tap **+** to add a new vendor: name, category, contact person, phone, and the total contract amount.
-- Tap an existing vendor to open its details: contract progress bar, its payments (read-only here — see Finance to record one), and a **Documents** section where you can attach contracts, quotations, or screenshots (photo or PDF, up to 8MB each).
-- **Sharing a vendor's finances**: inside a vendor's edit screen, there's a "Share this vendor's finances" toggle. By default, a vendor's contract amount and payments are private — visible only to whoever created it. Turn the toggle on and pick names to share it with (e.g. share "Wedding Photography" with Tanuka), and now she'll see that vendor's numbers too. Anyone not on the sharing list still sees the vendor exists (for coordinating tasks, contact info, etc.) but sees "🔒 Finance details are private" instead of the amounts.
+- Tap **+** to add a vendor: name, category, contact, phone, contract amount.
+- Tap an existing vendor to see its contract progress, payments, and attach documents (contracts, quotations, screenshots — photo or PDF, up to 8MB).
+- **Sharing**: every vendor has a "Share this" toggle. Turn it on and pick names from the list of people who have signed in — now they can see that vendor's numbers too. Nobody else sees anything beyond "🔒 Finance details are private."
+- You can only share with someone who has signed in at least once (so their name can appear in the picker). If Tanuka hasn't logged in yet, add her account and have her open the app once — she'll then show up as a shareable person everywhere.
 
 ### ₹ Finance
 
-This is where money actually gets tracked. It's organized into four parts, top to bottom:
-
 1. **Overview** — Contracted / Paid / Planned / Remaining, totalled only across what's shared with you or created by you.
-2. **Payments** — every individual payment, across all vendors, newest first. Tap **"+ Record payment"** at the top of this section to log one:
-   - Choose the vendor, enter the amount, then choose **Already paid** or **Planned for later**.
-     - **Already paid** asks who paid and the date it was paid.
-     - **Planned for later** asks for the expected date instead — nothing about "who paid" yet, since it hasn't happened.
-   - Tap **Save payment**.
-   - Tap any payment in the list afterward to open its details — you can edit the amount/date/note, attach the receipt or bill for *that specific payment* (its own photo/PDF, separate from the vendor's general documents), or delete it. If it was "Planned," there's a **"Mark as paid now"** button right there once it actually happens.
-3. **Vendors & contracts** — a quick-glance list of every vendor's paid-vs-contracted amount (or "🔒 Private" if it's not shared with you). Tap one to jump to its full vendor page.
-4. **Other expenses** — anything not tied to a specific vendor (e.g. a small cash purchase). Tap **"+ Add"** next to the heading. These can also be marked shared/private the same way as vendors.
-
-**Why can't I see some numbers?** If a vendor or expense shows "🔒 Private," whoever created it hasn't shared it with your profile. Ask them to open that vendor/expense and add your name under its sharing toggle.
+2. **Payments** — every payment, newest first. Tap **"+ Record payment"**: choose the vendor, the amount, then **Already paid** (asks who and when) or **Planned for later** (asks only for an expected date). Tap any payment afterward to edit it, attach its own receipt, or mark a planned one as paid once it happens.
+3. **Vendors & contracts** — quick glance at paid-vs-contracted per vendor (or "🔒 Private" if not shared with you).
+4. **Other expenses** — anything not tied to a vendor, shareable the same way.
 
 ### 💌 Guests
 
-Your guest list.
+One shared master guest list — both of you see and edit the same guests (this part is intentionally not private, since you're planning together).
 
-- Tap **"Import from Excel/CSV"** to bring in an existing spreadsheet. Your file's first row should be column headers — the app looks for columns like Name, Phone, Adults, Children, Cohort (or "Invited to"), RSVP, and Notes, and matches them automatically. You'll see a preview (how many new guests, how many look like duplicates already in your list) before anything is actually added.
-- Each guest has a **cohort**: *Full Wedding* (invited to everything) or *Reception Only*.
-- Tap the **RSVP badge** on the right of a guest's row to cycle it through Pending → Confirmed → Declined without opening the full form. Tap the guest's name/row itself to edit all their details.
-- Filter chips at the top narrow by RSVP status or cohort.
+- **Multiple events per guest**: when adding or editing a guest, tap to select every event they're invited to (Haldi, Wedding, Reception, etc. — whatever you've set up in Settings). A guest can be invited to several functions at once.
+- **Per-event RSVP**: below the event chips, each selected event gets its own Pending / Confirmed / Declined toggle — so a guest can be confirmed for the Wedding but still pending for the Reception.
+- On the guest list, small colored dots show each event and its status at a glance — tap a dot directly to cycle it through Pending → Confirmed → Declined without opening the full form.
+- **Bashor Raat**: if a guest is invited to whichever event you've marked as "the main Wedding day" (set this in that event's settings), an extra "Staying for Bashor Raat?" toggle appears on their form.
+- **Import from Excel/CSV**: pick which event(s) the file is for first (multi-select), then choose your file. New names get added with those events; names that already exist in your list get that event *added* to their existing invitations instead of being skipped — so you can safely import your Wedding list first, then your Reception list, and guests on both just get both events attached.
 
 ## ⚙️ Settings
 
-- **Wedding details** — the wedding and reception dates used for the countdown.
-- **Events** — add every function you're holding (Haldi, Sangeet, Wedding, Vidaai, Reception, whatever your family does), each with its own date, time, venue name, address, and who's invited (*Full Wedding guests* or *Everyone*). These show up as decorated cards on the Dashboard, along with an automatic headcount based on your guest list.
-- **People** — the list of names used throughout the app (as payers, and as sharing targets in Finance). Add or remove names here if your household needs more than two.
-- **Account** — shows who you're signed in as and which profile (Saubhik/Tanuka) you've picked on this device, with a button to change it.
-- **Data** — **Export backup** downloads a `.json` snapshot of everything, useful as an extra safety net even though your data already lives safely in the cloud. **Import backup** restores from such a file (this replaces all current data, with a confirmation first). **Erase all data** wipes everything — used only if you really want to start over.
+- **Wedding details** — dates used for the countdown.
+- **Events** — add every function you're holding, each with date/time/venue/address, a sharing toggle (in case, say, the bride's side Haldi details should stay private to one side until finalized), and a "this is the main Wedding day" flag that unlocks Bashor Raat tracking.
+- **People with access** — everyone who's ever signed in, shown automatically. To add someone new, create their account in the Firebase console (step A2) — no in-app invite step needed.
+- **Account / Data** — sign out, export/import backup, erase everything.
 
 ## Things worth knowing
 
-- **Offline works.** If you lose signal mid-edit, your change is saved on your phone and quietly syncs to the cloud (and to Tanuka's phone) the next time you're back online. You'll see a small "Syncing…" pill in the top right while that happens.
-- **Both of you editing at once** is fine for everyday use — changes merge in as they arrive. If you both happen to edit the exact same field within a second of each other, the last save wins; this is not a concern for normal day-to-day planning.
-- **Nothing is ever deleted quietly.** Deleting a task, vendor, guest, payment, or document always asks you to confirm first.
+- **Offline works.** Changes save locally first and sync once you're back online.
+- **Signing out clears this device's cache** and reloads fresh — use this if the app ever looks out of date after you've pushed an update to GitHub.
+- **Privacy note:** vendor/expense/event privacy is enforced by the app's own logic, checked against who you're signed in as. It is not the same as bank-grade encryption — a third person who somehow obtained valid sign-in credentials and dug through browser developer tools could theoretically see data not shared with them. For a private wedding between trusted family members, this is a reasonable and normal level of protection; it's just worth knowing this isn't a bank vault.
+- **First time opening this version:** whoever opens the app first "claims" any vendors/expenses/events that existed before this update (they become that person's private items, exactly as they appeared before). Anything added after that point follows the new private-by-default rule properly from the start.

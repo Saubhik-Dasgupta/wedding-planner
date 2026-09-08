@@ -1,4 +1,4 @@
-/* Wedding Secretary — Firebase-backed PWA (cloud sync, profiles, shared finance, offline cache) */
+/* Wedding Secretary — Firebase-backed PWA (cloud sync, per-account ownership+sharing, offline cache) */
 
 import { auth, db } from './firebase-config.js';
 import { CLOUDINARY_CLOUD_NAME, CLOUDINARY_UPLOAD_PRESET } from './cloud-config.js';
@@ -6,29 +6,28 @@ import {
   signInWithEmailAndPassword, onAuthStateChanged, signOut
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-auth.js";
 import {
-  doc, setDoc, onSnapshot
+  doc, getDoc, setDoc, onSnapshot
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
 
-const STORE_KEY = 'wedsec_v2_cache';
+const STORE_KEY = 'wedsec_v3_cache';
 const WEDDING_DOC_PATH = ['weddings', 'main'];
 
 const DEFAULT_DATA = {
   settings: {
     weddingDate: '2027-03-14',
     receptionDate: '2027-03-17',
-    peopleNames: ['Saubhik', 'Tanuka'],
     events: [
-      { id: 'ev_haldi', name: 'Haldi', date: '2027-03-13', time: '10:00', venue: '', address: '', audience: 'FULL' },
-      { id: 'ev_wedding', name: 'Wedding', date: '2027-03-14', time: '19:00', venue: '', address: '', audience: 'FULL' },
-      { id: 'ev_vidaai', name: 'Vidaai', date: '2027-03-15', time: '11:00', venue: '', address: '', audience: 'FULL' },
-      { id: 'ev_reception', name: 'Reception', date: '2027-03-17', time: '19:00', venue: '', address: '', audience: 'ALL' }
+      { id: 'ev_haldi', name: 'Haldi', date: '2027-03-13', time: '10:00', venue: '', address: '', isMainWedding: false, ownerId: null, sharedWith: [] },
+      { id: 'ev_wedding', name: 'Wedding', date: '2027-03-14', time: '19:00', venue: '', address: '', isMainWedding: true, ownerId: null, sharedWith: [] },
+      { id: 'ev_vidaai', name: 'Vidaai', date: '2027-03-15', time: '11:00', venue: '', address: '', isMainWedding: false, ownerId: null, sharedWith: [] },
+      { id: 'ev_reception', name: 'Reception', date: '2027-03-17', time: '19:00', venue: '', address: '', isMainWedding: false, ownerId: null, sharedWith: [] }
     ]
   },
-  profiles: {},   // { [uid]: profileName }
-  tasks: [],
-  vendors: [],
-  guests: [],
-  otherExpenses: []
+  directory: {},     // { [uid]: { name, email } } — everyone who has ever signed in
+  tasks: [],         // shared between everyone with access
+  vendors: [],        // private by default (ownerId + sharedWith[uid])
+  guests: [],         // shared between everyone with access; per-event invite/RSVP
+  otherExpenses: []  // private by default (ownerId + sharedWith[uid])
 };
 
 let state = structuredClone(DEFAULT_DATA);
@@ -39,6 +38,7 @@ let applyingRemoteUpdate = false;
 let saveTimer = null;
 let dashboardAnimated = false;
 
+/* ---------------- Local cache (fast paint + offline) ---------------- */
 function loadLocalCache(){
   try{
     const raw = localStorage.getItem(STORE_KEY);
@@ -47,10 +47,11 @@ function loadLocalCache(){
   }catch(e){ return null; }
 }
 function cacheLocally(){ try{ localStorage.setItem(STORE_KEY, JSON.stringify(state)); }catch(e){} }
+function clearLocalCache(){ try{ localStorage.removeItem(STORE_KEY); }catch(e){} }
 function deepMerge(base, extra){
   const out = { ...base, ...extra };
   out.settings = { ...base.settings, ...(extra.settings||{}) };
-  out.profiles = { ...base.profiles, ...(extra.profiles||{}) };
+  out.directory = { ...base.directory, ...(extra.directory||{}) };
   return out;
 }
 
@@ -72,9 +73,66 @@ function saveData(){
 }
 function showSyncStatus(on){ document.getElementById('syncStatus').classList.toggle('show', on); }
 
+/* ---------------- Migration: fixes data shaped by earlier versions of this app ---------------- */
+function normalizeState(s, uid){
+  s.directory = s.directory || {};
+  s.settings = s.settings || {};
+  s.settings.events = s.settings.events || [];
+
+  const looksLikeUid = (x) => typeof x === 'string' && x.length >= 20; // real Firebase UIDs are long; old data used short names
+
+  (s.vendors||[]).forEach(v=>{
+    if(!v.ownerId) v.ownerId = uid; // claim legacy data for whoever opens it first after upgrading
+    v.sharedWith = Array.isArray(v.sharedWith) ? v.sharedWith.filter(looksLikeUid) : [];
+    v.payments = (v.payments||[]).map(p=>({ documents: [], ...p, status: p.status || 'paid' }));
+    v.documents = v.documents || [];
+    delete v.createdBy; delete v.visibility;
+  });
+  (s.otherExpenses||[]).forEach(e=>{
+    if(!e.ownerId) e.ownerId = uid;
+    e.sharedWith = Array.isArray(e.sharedWith) ? e.sharedWith.filter(looksLikeUid) : [];
+    delete e.createdBy; delete e.visibility;
+  });
+  s.settings.events.forEach(ev=>{
+    if(!ev.ownerId) ev.ownerId = uid;
+    ev.sharedWith = Array.isArray(ev.sharedWith) ? ev.sharedWith.filter(looksLikeUid) : [];
+    if('audience' in ev) delete ev.audience;
+    if(ev.isMainWedding === undefined) ev.isMainWedding = /wedding/i.test(ev.name) && !/reception|haldi|vidaai|vidai|sangeet/i.test(ev.name);
+  });
+
+  const allEventIds = s.settings.events.map(e=>e.id);
+  const receptionEvent = s.settings.events.find(e=>/reception/i.test(e.name));
+  (s.guests||[]).forEach(g=>{
+    if(!g.events){
+      if(g.cohort==='RECEPTION' && receptionEvent) g.events = [receptionEvent.id];
+      else g.events = allEventIds.slice();
+      delete g.cohort;
+    }
+    g.events = (g.events||[]).filter(id=>allEventIds.includes(id));
+    g.eventStatus = g.eventStatus || {};
+    g.events.forEach(id=>{ if(!g.eventStatus[id]) g.eventStatus[id] = g.rsvp || 'pending'; });
+    if(g.bashorRaat === undefined) g.bashorRaat = false;
+  });
+  (s.tasks||[]).forEach(t=>{}); // tasks are shared as-is, nothing to migrate
+  return s;
+}
+function deriveName(email){ const local = (email||'?').split('@')[0]; return local.charAt(0).toUpperCase()+local.slice(1); }
+function upsertDirectory(s, user){
+  const existing = s.directory[user.uid];
+  const name = deriveName(user.email);
+  if(!existing || existing.name !== name || existing.email !== user.email){
+    s.directory[user.uid] = { name, email: user.email };
+    return true;
+  }
+  return false;
+}
+
 /* ---------------- Auth ---------------- */
+const splash = document.getElementById('appSplash');
 const loginScreen = document.getElementById('loginScreen');
-const profilePicker = document.getElementById('profilePicker');
+let splashHidden = false;
+function hideSplash(){ if(!splashHidden){ splash.classList.add('hidden'); splashHidden = true; } }
+
 document.getElementById('loginBtn').addEventListener('click', doLogin);
 document.getElementById('login_password').addEventListener('keydown', e=>{ if(e.key==='Enter') doLogin(); });
 function doLogin(){
@@ -91,30 +149,27 @@ function friendlyAuthError(code){
   if(code==='auth/network-request-failed') return 'No connection — check your internet.';
   return 'Could not sign in. ' + code;
 }
-document.getElementById('signOutBtn').addEventListener('click', ()=> signOut(auth));
-document.getElementById('changeProfileBtn').addEventListener('click', showProfilePicker);
 
-function myProfile(){ return currentUser ? (state.profiles[currentUser.uid] || null) : null; }
-function peopleNames(){ return state.settings.peopleNames && state.settings.peopleNames.length ? state.settings.peopleNames : ['Saubhik','Tanuka']; }
+document.getElementById('signOutBtn').addEventListener('click', async ()=>{
+  if(!confirm('Sign out? This clears cached data from this device (nothing is lost — it stays safely in the cloud).')) return;
+  clearLocalCache();
+  try{
+    if('caches' in window){ const keys = await caches.keys(); await Promise.all(keys.map(k=>caches.delete(k))); }
+    if('serviceWorker' in navigator){ const regs = await navigator.serviceWorker.getRegistrations(); await Promise.all(regs.map(r=>r.unregister())); }
+  }catch(e){ console.warn('Cache clear on sign-out failed', e); }
+  await signOut(auth);
+  location.reload();
+});
 
-function showProfilePicker(){
-  const list = document.getElementById('profileChoiceList');
-  list.innerHTML = peopleNames().map(name=>`<button data-name="${escapeAttr(name)}">${escapeHtml(name)}</button>`).join('');
-  list.querySelectorAll('button').forEach(btn=>{
-    btn.addEventListener('click', ()=>{
-      state.profiles[currentUser.uid] = btn.dataset.name;
-      saveData();
-      profilePicker.classList.add('hidden');
-      renderAll();
-      toast(`You're set up as ${btn.dataset.name}`);
-    });
-  });
-  profilePicker.classList.remove('hidden');
-}
+function myUid(){ return currentUser ? currentUser.uid : null; }
+function directoryList(){ return Object.entries(state.directory||{}).map(([uid, info])=>({ uid, ...info })); }
+function otherPeople(){ const me = myUid(); return directoryList().filter(p=>p.uid!==me); }
+function nameFor(uid){ return (state.directory[uid]||{}).name || 'Someone'; }
 
 let unsubscribeSnapshot = null;
 onAuthStateChanged(auth, async (user)=>{
   currentUser = user;
+  hideSplash();
   if(user){
     loginScreen.classList.add('hidden');
     document.getElementById('accountEmail').textContent = user.email;
@@ -123,17 +178,32 @@ onAuthStateChanged(auth, async (user)=>{
     const cached = loadLocalCache();
     if(cached){ state = cached; renderAll(); }
 
+    // One-time direct read (NOT a live listener) to decide: does the shared document already exist?
+    // This is the key fix for data loss — we only ever create/seed the document here, exactly once,
+    // and never from inside the live listener below (a transient "not found" from a live listener
+    // must never be treated as "this document doesn't exist yet", or it will overwrite real data).
+    try{
+      const snap = await getDoc(weddingDocRef);
+      if(snap.exists()){
+        state = normalizeState(deepMerge(structuredClone(DEFAULT_DATA), snap.data()), user.uid);
+      } else {
+        state = normalizeState(cached || structuredClone(DEFAULT_DATA), user.uid);
+      }
+      upsertDirectory(state, user);
+      cacheLocally();
+      await setDoc(weddingDocRef, state); // persist migration/seed/directory update once, explicitly
+      renderAll();
+    }catch(err){
+      console.error('Initial load failed', err);
+      if(cached) toast('Offline — showing last saved data');
+    }
+
     if(unsubscribeSnapshot) unsubscribeSnapshot();
     unsubscribeSnapshot = onSnapshot(weddingDocRef, (snap)=>{
+      if(!snap.exists()) return; // never auto-recreate here — see note above
       applyingRemoteUpdate = true;
-      if(snap.exists()){
-        state = deepMerge(structuredClone(DEFAULT_DATA), snap.data());
-      } else {
-        state = cached || structuredClone(DEFAULT_DATA);
-        setDoc(weddingDocRef, state).catch(()=>{});
-      }
+      state = normalizeState(deepMerge(structuredClone(DEFAULT_DATA), snap.data()), user.uid);
       cacheLocally();
-      if(!myProfile()) showProfilePicker(); else profilePicker.classList.add('hidden');
       renderAll();
       applyingRemoteUpdate = false;
     }, (err)=>{ console.error('Snapshot error', err); toast('Offline — showing last saved data'); });
@@ -142,7 +212,6 @@ onAuthStateChanged(auth, async (user)=>{
     weddingDocRef = null;
     state = structuredClone(DEFAULT_DATA);
     loginScreen.classList.remove('hidden');
-    profilePicker.classList.add('hidden');
   }
 });
 
@@ -166,7 +235,6 @@ function animateCount(el, to){
   }
   requestAnimationFrame(step);
 }
-
 function toast(msg){
   const t = document.getElementById('toast');
   document.getElementById('toastText').textContent = msg;
@@ -175,20 +243,19 @@ function toast(msg){
   toast._h = setTimeout(()=>t.classList.remove('show'), 1900);
 }
 
-/* Finance visibility: a vendor/expense is visible to `who` if they created it,
-   or it's explicitly marked shared and `who` is on the shared list. Legacy items
-   with no createdBy are treated as visible to everyone (nothing to hide). */
-function canSeeFinance(entity, who){
-  if(!entity.createdBy) return true;
-  if(entity.createdBy === who) return true;
-  if(entity.visibility === 'shared' && (entity.sharedWith||[]).includes(who)) return true;
-  return false;
+/* Visible to me if I own it, or it's explicitly shared with me. Items with no owner (very old data
+   that somehow slipped past migration) are treated as visible to everyone rather than silently hidden. */
+function canSee(entity, uid){
+  if(!entity.ownerId) return true;
+  if(entity.ownerId === uid) return true;
+  return (entity.sharedWith||[]).includes(uid);
 }
-function visibleVendors(){ const me = myProfile(); return state.vendors.filter(v=> canSeeFinance(v, me)); }
-function visibleExpenses(){ const me = myProfile(); return state.otherExpenses.filter(e=> canSeeFinance(e, me)); }
+function visibleVendors(){ const me = myUid(); return state.vendors.filter(v=> canSee(v, me)); }
+function visibleExpenses(){ const me = myUid(); return state.otherExpenses.filter(e=> canSee(e, me)); }
+function visibleEvents(){ const me = myUid(); return (state.settings.events||[]).filter(e=> canSee(e, me)); }
 function allPaymentsFlat(){
   const rows = [];
-  state.vendors.forEach(v=> (v.payments||[]).forEach(p=> rows.push({ ...p, vendorId: v.id, vendorName: v.name, vendorVisible: canSeeFinance(v, myProfile()) })));
+  state.vendors.forEach(v=> (v.payments||[]).forEach(p=> rows.push({ ...p, vendorId: v.id, vendorName: v.name, vendorVisible: canSee(v, myUid()) })));
   return rows;
 }
 
@@ -199,9 +266,17 @@ function switchView(view){
   document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
   document.getElementById('view-'+view).classList.add('active');
   document.querySelectorAll('.nav-btn').forEach(b=>b.classList.toggle('active', b.dataset.view===view));
-  document.getElementById('fabAdd').style.display = (view==='settings' || view==='finance') ? 'none' : 'flex';
+  document.getElementById('fabAdd').style.display = (view==='settings' || view==='finance' || view==='dashboard') ? 'none' : 'flex';
   renderAll();
 }
+document.querySelectorAll('.dash-tab').forEach(btn=>{
+  btn.addEventListener('click', ()=>{
+    document.querySelectorAll('.dash-tab').forEach(b=>b.classList.remove('active'));
+    btn.classList.add('active');
+    document.querySelectorAll('.dash-pane').forEach(p=>p.classList.remove('active'));
+    document.getElementById('dash-'+btn.dataset.dtab).classList.add('active');
+  });
+});
 
 /* ---------------- Sheet ---------------- */
 const backdrop = document.getElementById('sheetBackdrop');
@@ -214,8 +289,33 @@ document.getElementById('fabAdd').addEventListener('click', ()=>{
   if(currentView==='tasks') openTaskForm();
   else if(currentView==='vendors') openVendorForm();
   else if(currentView==='guests') openGuestForm();
-  else openTaskForm();
 });
+
+/* Reusable "share this with specific people" widget used by vendors/expenses/events */
+function shareToggleHtml(entity, idPrefix){
+  const chips = otherPeople().map(p=>`<button type="button" class="chip ${entity.sharedWith.includes(p.uid)?'active':''}" data-share-uid="${escapeAttr(p.uid)}">${escapeHtml(p.name)}</button>`).join('')
+    || '<p class="item-meta">No one else has signed in yet — once they do, you can share with them here.</p>';
+  return `
+    <div class="toggle-row">
+      <div><div class="toggle-label">Share this</div><div class="toggle-sub">Off = only you can see it</div></div>
+      <label class="switch"><input type="checkbox" id="${idPrefix}_shared" ${entity.visibility==='shared'||entity.sharedWith.length?'checked':''}><span class="track"></span></label>
+    </div>
+    <div id="${idPrefix}ShareChipsWrap" style="display:${entity.sharedWith.length?'block':'none'};margin-bottom:8px;"><div class="chip-row">${chips}</div></div>
+  `;
+}
+function wireShareToggle(entity, idPrefix){
+  const toggle = document.getElementById(`${idPrefix}_shared`);
+  const wrap = document.getElementById(`${idPrefix}ShareChipsWrap`);
+  toggle.addEventListener('change', (e)=>{ wrap.style.display = e.target.checked ? 'block' : 'none'; if(!e.target.checked) entity.sharedWith = []; });
+  sheetContent.querySelectorAll(`#${idPrefix}ShareChipsWrap [data-share-uid]`).forEach(chip=>{
+    chip.addEventListener('click', ()=>{
+      const uidVal = chip.dataset.shareUid;
+      const idx = entity.sharedWith.indexOf(uidVal);
+      if(idx>-1) entity.sharedWith.splice(idx,1); else entity.sharedWith.push(uidVal);
+      chip.classList.toggle('active');
+    });
+  });
+}
 
 /* ================= DASHBOARD ================= */
 function renderDashboard(){
@@ -234,9 +334,9 @@ function renderDashboard(){
   const totalPeople = state.guests.reduce((s,g)=>s+(Number(g.adults)||0)+(Number(g.children)||0),0);
   document.getElementById('statGuestTotal').textContent = state.guests.length;
   document.getElementById('statGuestPeople').textContent = totalPeople + ' people incl. children';
-  document.getElementById('statGuestConfirmed').textContent = state.guests.filter(g=>g.rsvp==='confirmed').length;
-  document.getElementById('statGuestPending').textContent = state.guests.filter(g=>g.rsvp==='pending').length;
-  document.getElementById('statGuestDeclined').textContent = state.guests.filter(g=>g.rsvp==='declined').length;
+  document.getElementById('statGuestConfirmed').textContent = state.guests.filter(g=>Object.values(g.eventStatus||{}).some(s=>s==='confirmed')).length;
+  document.getElementById('statGuestPending').textContent = state.guests.filter(g=>Object.values(g.eventStatus||{}).every(s=>s==='pending')).length;
+  document.getElementById('statGuestDeclined').textContent = state.guests.filter(g=>Object.values(g.eventStatus||{}).length && Object.values(g.eventStatus||{}).every(s=>s==='declined')).length;
 
   const openTasks = state.tasks.filter(t=>t.status!=='done');
   const overdue = state.tasks.filter(t=> t.status!=='done' && t.dueDate && t.dueDate < todayISO());
@@ -255,13 +355,11 @@ function renderDashboard(){
   });
   visibleVendors().forEach(v=>{
     (v.payments||[]).filter(p=>p.status==='planned').forEach(p=>{
-      if(p.plannedDate && p.plannedDate <= addDays(todayISO(),14)){
-        alerts.push({type:'vendor', text:`${v.name}: planned payment of ${money(p.amount)} due ${formatDateShort(p.plannedDate)}`});
-      }
+      if(p.plannedDate && p.plannedDate <= addDays(todayISO(),14)) alerts.push({type:'vendor', text:`${v.name}: planned payment of ${money(p.amount)} due ${formatDateShort(p.plannedDate)}`});
     });
   });
   if(days>=0 && days<=14){
-    const pendingGuests = state.guests.filter(g=>g.rsvp==='pending').length;
+    const pendingGuests = state.guests.filter(g=>Object.values(g.eventStatus||{}).some(s=>s==='pending')).length;
     if(pendingGuests>0) alerts.push({type:'guests', text:`${pendingGuests} guests haven't responded — wedding is ${days} days away`});
   }
   alertsBox.innerHTML='';
@@ -280,37 +378,32 @@ function addDays(iso, n){ const d = new Date(iso+'T00:00:00'); d.setDate(d.getDa
 
 function renderEventsBox(){
   const box = document.getElementById('eventsBox');
-  const events = [...(state.settings.events||[])].sort((a,b)=> (a.date||'').localeCompare(b.date||''));
+  const events = [...visibleEvents()].sort((a,b)=> (a.date||'').localeCompare(b.date||''));
   if(events.length===0){ box.innerHTML = emptyState('No events yet', 'Add Haldi, Wedding, Reception and more in Settings.'); return; }
   const pinIcon = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 21s-6-5.5-6-10a6 6 0 0112 0c0 4.5-6 10-6 10z"/><circle cx="12" cy="11" r="2.2"/></svg>`;
   box.innerHTML = events.map(ev=>{
-    const count = guestCountForEvent(ev);
+    const attendees = state.guests.filter(g=>(g.events||[]).includes(ev.id));
+    const count = attendees.reduce((s,g)=>s+(Number(g.adults)||0)+(Number(g.children)||0),0);
+    const bashorCount = ev.isMainWedding ? state.guests.filter(g=>g.bashorRaat && (g.events||[]).includes(ev.id)).length : 0;
     return `<div class="event-card">
       <div class="event-top">
-        <div class="event-name">${escapeHtml(ev.name)}</div>
+        <div class="event-name">${escapeHtml(ev.name)}${ev.sharedWith && ev.sharedWith.length ? ` <span class="event-shared">Shared</span>`:''}</div>
         <div class="event-when">${ev.date? formatDateShort(ev.date):''}${ev.time? ' · '+ev.time:''}</div>
       </div>
       ${ev.venue || ev.address ? `<div class="event-meta">${pinIcon}<span>${escapeHtml(ev.venue)}${ev.venue && ev.address? ' — ':''}${escapeHtml(ev.address)}</span></div>` : ''}
       <div class="event-count">🎉 ${count} guests expected</div>
+      ${ev.isMainWedding ? `<span class="event-bashor">🌙 ${bashorCount} staying for Bashor Raat</span>` : ''}
     </div>`;
   }).join('');
-}
-function guestCountForEvent(ev){
-  const relevant = state.guests.filter(g=> ev.audience==='ALL' ? true : g.cohort==='FULL');
-  return relevant.reduce((s,g)=>s+(Number(g.adults)||0)+(Number(g.children)||0),0);
 }
 
 function renderBudgetBox(){
   const box = document.getElementById('budgetBox');
-  const me = myProfile();
   const vendors = visibleVendors();
   let contracted=0, paid=0, scheduled=0;
   vendors.forEach(v=>{
     contracted += Number(v.contract)||0;
-    (v.payments||[]).forEach(p=>{
-      if(p.status==='paid') paid += Number(p.amount||0);
-      else scheduled += Number(p.amount||0);
-    });
+    (v.payments||[]).forEach(p=> p.status==='paid' ? paid += Number(p.amount||0) : scheduled += Number(p.amount||0));
   });
   const hiddenCount = state.vendors.length - vendors.length;
   box.innerHTML = `
@@ -323,11 +416,11 @@ function renderBudgetBox(){
       <div><div class="label">Paid</div><div class="value">${money(paid)}</div></div>
       <div><div class="label">Planned</div><div class="value">${money(scheduled)}</div></div>
     </div>
-    ${hiddenCount ? `<div class="item-meta" style="margin-top:8px;">${hiddenCount} vendor${hiddenCount===1?'':'s'} kept private aren't included above.</div>` : ''}
+    ${hiddenCount ? `<div class="item-meta" style="margin-top:8px;">${hiddenCount} vendor${hiddenCount===1?'':'s'} not shared with you aren't included above.</div>` : ''}
   `;
 }
 
-/* ================= TASKS ================= */
+/* ================= TASKS (shared between everyone) ================= */
 let taskFilter = 'all';
 document.querySelectorAll('#taskFilter .seg-btn').forEach(b=>{
   b.addEventListener('click', ()=>{
@@ -431,14 +524,14 @@ function openTaskForm(task){
   };
 }
 
-/* ================= VENDORS ================= */
+/* ================= VENDORS (private by default, shareable) ================= */
 function renderVendors(){
   const list = document.getElementById('vendorList');
   list.innerHTML='';
   if(state.vendors.length===0){ list.innerHTML = emptyState('No vendors yet', 'Tap + to add a photographer, venue, caterer...'); return; }
-  const me = myProfile();
+  const me = myUid();
   state.vendors.forEach(v=>{
-    const canSee = canSeeFinance(v, me);
+    const canSeeIt = canSee(v, me);
     const paid = (v.payments||[]).filter(p=>p.status==='paid').reduce((s,p)=>s+Number(p.amount||0),0);
     const contract = Number(v.contract)||0;
     const pct = contract>0 ? Math.min(100, Math.round(paid/contract*100)) : 0;
@@ -450,9 +543,9 @@ function renderVendors(){
           <div class="item-title">${escapeHtml(v.name)}</div>
           <div class="item-meta">${escapeHtml(v.category||'Uncategorized')}${v.phone? ' · '+escapeHtml(v.phone):''}</div>
         </div>
-        ${v.visibility==='shared' ? `<span class="badge tappable" style="background:#EAF1EE;color:var(--sage);">Shared</span>` : ''}
+        ${v.sharedWith && v.sharedWith.length ? `<span class="badge" style="background:#EAF1EE;color:var(--sage);">Shared</span>` : ''}
       </div>
-      ${canSee ? `
+      ${canSeeIt ? `
         <div class="vendor-money">
           <div>Contract<b>${money(contract)}</b></div>
           <div>Paid<b>${money(paid)}</b></div>
@@ -467,13 +560,13 @@ function renderVendors(){
 }
 function openVendorForm(vendor){
   const isEdit = !!vendor;
-  vendor = vendor || { id: uid(), name:'', category:'', contact:'', phone:'', contract:0, payments:[], documents:[], visibility:'private', sharedWith:[], createdBy: myProfile() };
+  vendor = vendor || { id: uid(), name:'', category:'', contact:'', phone:'', contract:0, payments:[], documents:[], sharedWith:[], ownerId: myUid() };
   vendor.documents = vendor.documents || [];
   vendor.payments = vendor.payments || [];
   vendor.sharedWith = vendor.sharedWith || [];
-  if(!vendor.createdBy) vendor.createdBy = myProfile();
+  if(!vendor.ownerId) vendor.ownerId = myUid();
 
-  const canSee = canSeeFinance(vendor, myProfile());
+  const canSeeIt = canSee(vendor, myUid());
   const paid = vendor.payments.filter(p=>p.status==='paid').reduce((s,p)=>s+Number(p.amount||0),0);
 
   const paymentsHtml = vendor.payments.length ? vendor.payments.slice(0,5).map(p=>`
@@ -492,10 +585,9 @@ function openVendorForm(vendor){
     </div>
   `).join('') : '<div class="item-meta" style="margin-bottom:8px;">No documents yet — add a bill, contract, or screenshot below.</div>';
 
-  const shareChips = peopleNames().map(name=>`<button type="button" class="chip ${vendor.sharedWith.includes(name)?'active':''}" data-share-name="${escapeAttr(name)}">${escapeHtml(name)}</button>`).join('');
-
   openSheet(`
     <h3 class="serif">${isEdit?'Edit vendor':'New vendor'}</h3>
+    ${isEdit && vendor.ownerId!==myUid() ? `<p class="sheet-sub">Added by ${escapeHtml(nameFor(vendor.ownerId))}, shared with you.</p>` : ''}
     <div class="field"><label>Name</label><input id="v_name" value="${escapeAttr(vendor.name)}" placeholder="e.g. Sharma Studios"></div>
     <div class="field-row">
       <div class="field"><label>Category</label><input id="v_category" value="${escapeAttr(vendor.category)}" placeholder="Photography, Catering..."></div>
@@ -505,19 +597,13 @@ function openVendorForm(vendor){
     <div class="field"><label>Contract amount (₹)</label><input type="number" id="v_contract" value="${vendor.contract||0}"></div>
 
     <div class="section-title" style="margin-top:16px;">Sharing</div>
-    <div class="toggle-row">
-      <div><div class="toggle-label">Share this vendor's finances</div><div class="toggle-sub">Off = only you (${escapeHtml(vendor.createdBy||myProfile()||'you')}) can see amounts</div></div>
-      <label class="switch"><input type="checkbox" id="v_shared" ${vendor.visibility==='shared'?'checked':''}><span class="track"></span></label>
-    </div>
-    <div id="shareChipsWrap" style="display:${vendor.visibility==='shared'?'block':'none'};margin-bottom:8px;">
-      <div class="chip-row">${shareChips}</div>
-    </div>
+    ${shareToggleHtml(vendor, 'v')}
 
-    ${isEdit && canSee ? `
+    ${isEdit && canSeeIt ? `
     <div class="section-title" style="margin-top:16px;">Payments — ${money(paid)} of ${money(vendor.contract)} paid</div>
     ${paymentsHtml}
     <button class="btn btn-gold" id="goRecordPaymentBtn" style="width:100%;margin-top:8px;">Record a payment for this vendor →</button>
-    ` : isEdit ? `<div class="section-title" style="margin-top:16px;">Payments</div><div class="item-meta">🔒 Private to ${escapeHtml(vendor.createdBy||'the owner')}</div>` : ''}
+    ` : isEdit ? `<div class="section-title" style="margin-top:16px;">Payments</div><div class="item-meta">🔒 Private to ${escapeHtml(nameFor(vendor.ownerId))}</div>` : ''}
 
     ${isEdit ? `
     <div class="section-title" style="margin-top:16px;">Documents</div>
@@ -536,35 +622,19 @@ function openVendorForm(vendor){
     </div>
   `);
   document.getElementById('cancelBtn').onclick = closeSheet;
-  document.getElementById('v_shared').addEventListener('change', (e)=>{
-    document.getElementById('shareChipsWrap').style.display = e.target.checked ? 'block' : 'none';
-  });
-  sheetContent.querySelectorAll('[data-share-name]').forEach(chip=>{
-    chip.addEventListener('click', ()=>{
-      const name = chip.dataset.shareName;
-      const idx = vendor.sharedWith.indexOf(name);
-      if(idx>-1) vendor.sharedWith.splice(idx,1); else vendor.sharedWith.push(name);
-      chip.classList.toggle('active');
-    });
-  });
+  wireShareToggle(vendor, 'v');
   sheetContent.querySelectorAll('[data-open-payment]').forEach(row=>{
-    row.addEventListener('click', ()=>{
-      const p = vendor.payments.find(x=>x.id===row.dataset.openPayment);
-      if(p) openPaymentDetail(p, vendor);
-    });
+    row.addEventListener('click', ()=>{ const p = vendor.payments.find(x=>x.id===row.dataset.openPayment); if(p) openPaymentDetail(p, vendor); });
   });
   const goBtn = document.getElementById('goRecordPaymentBtn');
   if(goBtn) goBtn.onclick = ()=>{ closeSheet(); openRecordPaymentSheet(vendor.id); };
-
   if(isEdit){
     document.getElementById('deleteBtn').onclick = ()=>{
       state.vendors = state.vendors.filter(x=>x.id!==vendor.id);
       saveData(); closeSheet(); renderAll(); toast('Vendor deleted');
     };
     document.getElementById('docFileInput').addEventListener('change', (e)=> handleDocUpload(e, vendor));
-    document.querySelectorAll('[data-doc-id]').forEach(btn=>{
-      btn.addEventListener('click', ()=> handleDocDelete(btn.dataset.docId, vendor));
-    });
+    document.querySelectorAll('[data-doc-id]').forEach(btn=>{ btn.addEventListener('click', ()=> handleDocDelete(btn.dataset.docId, vendor)); });
   }
   document.getElementById('saveBtn').onclick = ()=>{
     const name = document.getElementById('v_name').value.trim();
@@ -574,7 +644,6 @@ function openVendorForm(vendor){
     vendor.phone = document.getElementById('v_phone').value;
     vendor.contact = document.getElementById('v_contact').value;
     vendor.contract = Number(document.getElementById('v_contract').value)||0;
-    vendor.visibility = document.getElementById('v_shared').checked ? 'shared' : 'private';
     if(!isEdit) state.vendors.push(vendor);
     saveData(); closeSheet(); renderAll(); toast('Vendor saved');
   };
@@ -621,14 +690,13 @@ document.getElementById('recordPaymentBtn').addEventListener('click', ()=> openR
 document.getElementById('addOtherExpenseBtn').addEventListener('click', ()=> openExpenseForm());
 
 function renderFinance(){
-  const me = myProfile();
+  const me = myUid();
   const vendors = visibleVendors();
   let contracted=0, paid=0, scheduled=0;
   vendors.forEach(v=>{
     contracted += Number(v.contract)||0;
     (v.payments||[]).forEach(p=> p.status==='paid' ? paid += Number(p.amount||0) : scheduled += Number(p.amount||0));
   });
-  const otherTotal = visibleExpenses().reduce((s,e)=>s+Number(e.amount||0),0);
 
   document.getElementById('financeOverviewBox').innerHTML = `
     <div class="stat-grid">
@@ -673,14 +741,11 @@ function renderFinance(){
   vlist.innerHTML='';
   if(state.vendors.length===0){ vlist.innerHTML = emptyState('No vendors yet','Add vendors in the Vendors tab to track contracts.'); }
   state.vendors.forEach(v=>{
-    const canSee = canSeeFinance(v, me);
+    const canSeeIt = canSee(v, me);
     const p = (v.payments||[]).filter(x=>x.status==='paid').reduce((s,x)=>s+Number(x.amount||0),0);
     const el = document.createElement('div');
     el.className='item';
-    el.innerHTML = `<div class="item-top">
-        <div class="item-title">${escapeHtml(v.name)}</div>
-        <b>${canSee ? money(p)+' / '+money(v.contract) : '🔒 Private'}</b>
-      </div>`;
+    el.innerHTML = `<div class="item-top"><div class="item-title">${escapeHtml(v.name)}</div><b>${canSeeIt ? money(p)+' / '+money(v.contract) : '🔒 Private'}</b></div>`;
     el.addEventListener('click', ()=> openVendorForm(v));
     vlist.appendChild(el);
   });
@@ -692,10 +757,7 @@ function renderFinance(){
   others.forEach(e=>{
     const el = document.createElement('div');
     el.className='item';
-    el.innerHTML = `<div class="item-top">
-        <div><div class="item-title">${escapeHtml(e.name)}</div><div class="item-meta">${e.date? formatDateShort(e.date):''}</div></div>
-        <b>${money(e.amount)}</b>
-      </div>`;
+    el.innerHTML = `<div class="item-top"><div><div class="item-title">${escapeHtml(e.name)}</div><div class="item-meta">${e.date? formatDateShort(e.date):''}</div></div><b>${money(e.amount)}</b></div>`;
     el.addEventListener('click', ()=> openExpenseForm(e));
     olist.appendChild(el);
   });
@@ -704,7 +766,7 @@ function renderFinance(){
 function openRecordPaymentSheet(preselectVendorId){
   if(state.vendors.length===0){ toast('Add a vendor first'); return; }
   const vendorOptions = state.vendors.map(v=>`<option value="${v.id}" ${v.id===preselectVendorId?'selected':''}>${escapeHtml(v.name)}</option>`).join('');
-  const payerOptions = peopleNames().map(n=>`<option value="${escapeAttr(n)}">${escapeHtml(n)}</option>`).join('');
+  const payerOptions = directoryList().map(p=>`<option value="${escapeAttr(p.name)}">${escapeHtml(p.name)}</option>`).join('');
   openSheet(`
     <h3 class="serif">Record a payment</h3>
     <p class="sheet-sub">This logs a transaction against a vendor's contract — mark it as already paid, or planned for later.</p>
@@ -720,9 +782,7 @@ function openRecordPaymentSheet(preselectVendorId){
         <div class="field"><label>Date paid</label><input type="date" id="p_date" value="${todayISO()}"></div>
       </div>
     </div>
-    <div id="plannedFields" style="display:none;">
-      <div class="field"><label>Expected date</label><input type="date" id="p_planned_date" value="${todayISO()}"></div>
-    </div>
+    <div id="plannedFields" style="display:none;"><div class="field"><label>Expected date</label><input type="date" id="p_planned_date" value="${todayISO()}"></div></div>
     <div class="field"><label>Note</label><input id="p_note" placeholder="Optional"></div>
     <div class="sheet-actions">
       <button class="btn btn-ghost" id="cancelBtn">Cancel</button>
@@ -762,27 +822,24 @@ function openRecordPaymentSheet(preselectVendorId){
 
 function openPaymentDetail(payment, vendor){
   const docsHtml = (payment.documents||[]).length ? payment.documents.map(d=>`
-    <div class="doc-item">
-      <a href="${d.url}" target="_blank" rel="noopener">${escapeHtml(d.name)}</a>
-      <button type="button" class="btn btn-danger btn-sm" data-pdoc-id="${escapeAttr(d.publicId)}">Delete</button>
-    </div>`).join('') : '<div class="item-meta" style="margin-bottom:8px;">No receipt attached yet.</div>';
+    <div class="doc-item"><a href="${d.url}" target="_blank" rel="noopener">${escapeHtml(d.name)}</a>
+      <button type="button" class="btn btn-danger btn-sm" data-pdoc-id="${escapeAttr(d.publicId)}">Delete</button></div>`).join('')
+    : '<div class="item-meta" style="margin-bottom:8px;">No receipt attached yet.</div>';
 
   openSheet(`
     <h3 class="serif">${escapeHtml(vendor.name)}</h3>
     <p class="sheet-sub">${money(payment.amount)} · ${payment.status==='paid' ? 'Paid' : 'Planned'}</p>
-
     ${payment.status==='planned' ? `
       <div class="field"><label>Expected date</label><input type="date" id="pd_planned" value="${payment.plannedDate||''}"></div>
       <button class="btn btn-gold" id="markPaidBtn" style="width:100%;margin-bottom:14px;">Mark as paid now</button>
     ` : `
       <div class="field-row">
-        <div class="field"><label>Paid by</label><select id="pd_payer">${peopleNames().map(n=>`<option value="${escapeAttr(n)}" ${n===payment.payer?'selected':''}>${escapeHtml(n)}</option>`).join('')}</select></div>
+        <div class="field"><label>Paid by</label><select id="pd_payer">${directoryList().map(p=>`<option value="${escapeAttr(p.name)}" ${p.name===payment.payer?'selected':''}>${escapeHtml(p.name)}</option>`).join('')}</select></div>
         <div class="field"><label>Date paid</label><input type="date" id="pd_date" value="${payment.date||''}"></div>
       </div>
     `}
     <div class="field"><label>Amount (₹)</label><input type="number" id="pd_amount" value="${payment.amount}"></div>
     <div class="field"><label>Note</label><input id="pd_note" value="${escapeAttr(payment.note||'')}"></div>
-
     <div class="section-title" style="margin-top:4px;">Receipt / bill</div>
     <div id="paymentDocsList">${docsHtml}</div>
     <label class="btn btn-ghost" id="paymentDocUploadLabel" style="width:100%;display:block;text-align:center;margin-top:4px;">
@@ -790,7 +847,6 @@ function openPaymentDetail(payment, vendor){
       <input type="file" id="paymentDocInput" accept="image/*,application/pdf" style="display:none;">
     </label>
     <div class="login-error" id="paymentDocError"></div>
-
     <div class="sheet-actions">
       <button class="btn btn-danger" id="deletePaymentBtn">Delete</button>
       <button class="btn btn-ghost" id="cancelBtn">Close</button>
@@ -804,20 +860,14 @@ function openPaymentDetail(payment, vendor){
   };
   const markPaidBtn = document.getElementById('markPaidBtn');
   if(markPaidBtn) markPaidBtn.onclick = ()=>{
-    payment.status = 'paid';
-    payment.date = todayISO();
-    payment.payer = peopleNames()[0] || '';
+    payment.status = 'paid'; payment.date = todayISO(); payment.payer = nameFor(myUid());
     saveData(); closeSheet(); renderAll(); toast('Marked as paid');
   };
   document.getElementById('savePaymentBtn').onclick = ()=>{
     payment.amount = Number(document.getElementById('pd_amount').value) || payment.amount;
     payment.note = document.getElementById('pd_note').value;
-    if(payment.status==='planned'){
-      payment.plannedDate = document.getElementById('pd_planned').value;
-    } else {
-      payment.payer = document.getElementById('pd_payer').value;
-      payment.date = document.getElementById('pd_date').value;
-    }
+    if(payment.status==='planned'){ payment.plannedDate = document.getElementById('pd_planned').value; }
+    else { payment.payer = document.getElementById('pd_payer').value; payment.date = document.getElementById('pd_date').value; }
     saveData(); closeSheet(); renderAll(); toast('Payment updated');
   };
   document.getElementById('paymentDocInput').addEventListener('change', (e)=>{
@@ -850,9 +900,9 @@ function openPaymentDetail(payment, vendor){
 
 function openExpenseForm(expense){
   const isEdit = !!expense;
-  expense = expense || { id: uid(), name:'', amount:0, date: todayISO(), createdBy: myProfile(), visibility:'private', sharedWith:[] };
+  expense = expense || { id: uid(), name:'', amount:0, date: todayISO(), ownerId: myUid(), sharedWith:[] };
   expense.sharedWith = expense.sharedWith || [];
-  const shareChips = peopleNames().map(name=>`<button type="button" class="chip ${expense.sharedWith.includes(name)?'active':''}" data-share-name="${escapeAttr(name)}">${escapeHtml(name)}</button>`).join('');
+  if(!expense.ownerId) expense.ownerId = myUid();
   openSheet(`
     <h3 class="serif">${isEdit?'Edit expense':'New expense'}</h3>
     <div class="field"><label>Description</label><input id="e_name" value="${escapeAttr(expense.name)}" placeholder="e.g. Mehndi artist"></div>
@@ -860,11 +910,8 @@ function openExpenseForm(expense){
       <div class="field"><label>Amount (₹)</label><input type="number" id="e_amount" value="${expense.amount||0}"></div>
       <div class="field"><label>Date</label><input type="date" id="e_date" value="${expense.date||todayISO()}"></div>
     </div>
-    <div class="toggle-row">
-      <div><div class="toggle-label">Share this expense</div></div>
-      <label class="switch"><input type="checkbox" id="e_shared" ${expense.visibility==='shared'?'checked':''}><span class="track"></span></label>
-    </div>
-    <div id="eShareChipsWrap" style="display:${expense.visibility==='shared'?'block':'none'};margin-bottom:8px;"><div class="chip-row">${shareChips}</div></div>
+    <div class="section-title" style="margin-top:8px;">Sharing</div>
+    ${shareToggleHtml(expense, 'e')}
     <div class="sheet-actions">
       ${isEdit? '<button class="btn btn-danger" id="deleteBtn">Delete</button>' : ''}
       <button class="btn btn-ghost" id="cancelBtn">Cancel</button>
@@ -872,15 +919,7 @@ function openExpenseForm(expense){
     </div>
   `);
   document.getElementById('cancelBtn').onclick = closeSheet;
-  document.getElementById('e_shared').addEventListener('change', (e)=>{ document.getElementById('eShareChipsWrap').style.display = e.target.checked?'block':'none'; });
-  sheetContent.querySelectorAll('[data-share-name]').forEach(chip=>{
-    chip.addEventListener('click', ()=>{
-      const name = chip.dataset.shareName;
-      const idx = expense.sharedWith.indexOf(name);
-      if(idx>-1) expense.sharedWith.splice(idx,1); else expense.sharedWith.push(name);
-      chip.classList.toggle('active');
-    });
-  });
+  wireShareToggle(expense, 'e');
   if(isEdit) document.getElementById('deleteBtn').onclick = ()=>{
     state.otherExpenses = state.otherExpenses.filter(x=>x.id!==expense.id);
     saveData(); closeSheet(); renderAll(); toast('Expense deleted');
@@ -891,14 +930,12 @@ function openExpenseForm(expense){
     expense.name = name;
     expense.amount = Number(document.getElementById('e_amount').value)||0;
     expense.date = document.getElementById('e_date').value;
-    expense.visibility = document.getElementById('e_shared').checked ? 'shared' : 'private';
-    if(!expense.createdBy) expense.createdBy = myProfile();
     if(!isEdit) state.otherExpenses.push(expense);
     saveData(); closeSheet(); renderAll(); toast('Expense saved');
   };
 }
 
-/* ================= GUESTS ================= */
+/* ================= GUESTS (shared; per-event invite + RSVP) ================= */
 let guestFilter='all';
 document.querySelectorAll('#guestFilter .seg-btn').forEach(b=>{
   b.addEventListener('click', ()=>{
@@ -910,16 +947,29 @@ document.querySelectorAll('#guestFilter .seg-btn').forEach(b=>{
 });
 document.getElementById('importGuestsBtn').addEventListener('click', openImportPicker);
 
+function eventById(id){ return (state.settings.events||[]).find(e=>e.id===id); }
+function overallGuestStatus(g){
+  const statuses = Object.values(g.eventStatus||{});
+  if(statuses.length===0) return 'pending';
+  if(statuses.every(s=>s==='confirmed')) return 'confirmed';
+  if(statuses.every(s=>s==='declined')) return 'declined';
+  return 'pending';
+}
 function normalizeHeader(h){ return String(h||'').toLowerCase().replace(/[^a-z0-9]/g,''); }
 function findColumn(headers, synonyms){ const normSyns = synonyms.map(normalizeHeader); return headers.find(h => normSyns.includes(normalizeHeader(h))); }
+
 function openImportPicker(){
+  const events = state.settings.events||[];
+  if(events.length===0){ toast('Add an event in Settings first'); return; }
+  const chips = events.map(ev=>`<button type="button" class="chip" data-import-event="${ev.id}">${escapeHtml(ev.name)}</button>`).join('');
   openSheet(`
     <h3 class="serif">Import guests</h3>
-    <p style="font-size:13.5px;color:var(--text-soft);line-height:1.5;">
-      Choose an .xlsx, .xls, or .csv file. The first row should be column headers
-      (e.g. Name, Phone, Adults, Children, Cohort, RSVP, Notes) — matching columns are detected automatically.
+    <p class="sheet-sub">Which event(s) is this guest list for? Everyone in the file will be marked as invited to whichever you pick.</p>
+    <div class="chip-row" id="importEventChips">${chips}</div>
+    <p style="font-size:13px;color:var(--text-soft);line-height:1.5;margin-top:14px;">
+      Then choose an .xlsx, .xls, or .csv file with a header row (Name, Phone, Adults, Children, RSVP, Notes — matching columns are detected automatically).
     </p>
-    <label class="btn btn-primary" id="importFileLabel" style="width:100%;display:block;text-align:center;margin-top:10px;">
+    <label class="btn btn-primary" id="importFileLabel" style="width:100%;display:block;text-align:center;margin-top:6px;">
       Choose file
       <input type="file" id="importFileInput" accept=".xlsx,.xls,.csv" style="display:none;">
     </label>
@@ -927,9 +977,20 @@ function openImportPicker(){
     <div class="sheet-actions"><button class="btn btn-ghost" id="cancelBtn" style="width:100%;">Cancel</button></div>
   `);
   document.getElementById('cancelBtn').onclick = closeSheet;
-  document.getElementById('importFileInput').addEventListener('change', handleImportFile);
+  const selectedEvents = new Set();
+  sheetContent.querySelectorAll('[data-import-event]').forEach(chip=>{
+    chip.addEventListener('click', ()=>{
+      const id = chip.dataset.importEvent;
+      if(selectedEvents.has(id)){ selectedEvents.delete(id); chip.classList.remove('active'); }
+      else { selectedEvents.add(id); chip.classList.add('active'); }
+    });
+  });
+  document.getElementById('importFileInput').addEventListener('change', (e)=>{
+    if(selectedEvents.size===0){ document.getElementById('importError').textContent = 'Pick at least one event first.'; e.target.value=''; return; }
+    handleImportFile(e, Array.from(selectedEvents));
+  });
 }
-function handleImportFile(e){
+function handleImportFile(e, targetEventIds){
   const file = e.target.files[0];
   if(!file) return;
   const errEl = document.getElementById('importError');
@@ -941,149 +1002,207 @@ function handleImportFile(e){
       const sheet = wb.Sheets[wb.SheetNames[0]];
       const rows = XLSX.utils.sheet_to_json(sheet, { defval: '' });
       if(rows.length === 0){ errEl.textContent = 'No rows found in that file.'; return; }
-      processImportRows(rows);
+      processImportRows(rows, targetEventIds);
     }catch(err){ console.error(err); errEl.textContent = 'Could not read that file — make sure it\'s a valid Excel or CSV file.'; }
   };
   reader.readAsArrayBuffer(file);
 }
-function processImportRows(rows){
+function processImportRows(rows, targetEventIds){
   const headers = Object.keys(rows[0]);
   const col = {
     name: findColumn(headers, ['name','guest name','full name']),
     phone: findColumn(headers, ['phone','mobile','contact','phone number','mobile number']),
-    cohort: findColumn(headers, ['cohort','invited to','event','invitation','category']),
     rsvp: findColumn(headers, ['rsvp','status','rsvp status']),
     adults: findColumn(headers, ['adults','adult','no of adults','number of adults']),
     children: findColumn(headers, ['children','child','kids','no of children','number of children']),
     notes: findColumn(headers, ['notes','note','remarks','comments','comment'])
   };
   if(!col.name){ document.getElementById('importError').textContent = 'Could not find a "Name" column in that file.'; return; }
-  const existingNames = new Set(state.guests.map(g=>g.name.trim().toLowerCase()));
-  const toImport = []; const duplicates = []; let skippedBlank = 0;
+  const existingByName = new Map(state.guests.map(g=>[g.name.trim().toLowerCase(), g]));
+  const toImport = []; const toUpdate = []; let skippedBlank = 0;
   rows.forEach(row=>{
     const name = String(row[col.name]||'').trim();
     if(!name){ skippedBlank++; return; }
-    if(existingNames.has(name.toLowerCase())){ duplicates.push(name); return; }
-    const cohortRaw = String(col.cohort ? row[col.cohort] : '').toLowerCase();
     const rsvpRaw = String(col.rsvp ? row[col.rsvp] : '').toLowerCase();
-    const guest = {
-      id: uid(), name,
-      phone: col.phone ? String(row[col.phone]||'').trim() : '',
-      cohort: cohortRaw.includes('reception') ? 'RECEPTION' : 'FULL',
-      rsvp: rsvpRaw.includes('confirm') ? 'confirmed' : rsvpRaw.includes('declin') ? 'declined' : 'pending',
-      adults: col.adults ? (Number(row[col.adults]) || 1) : 1,
-      children: col.children ? (Number(row[col.children]) || 0) : 0,
-      notes: col.notes ? String(row[col.notes]||'').trim() : ''
-    };
-    toImport.push(guest);
-    existingNames.add(name.toLowerCase());
+    const rsvpStatus = rsvpRaw.includes('confirm') ? 'confirmed' : rsvpRaw.includes('declin') ? 'declined' : 'pending';
+    const existing = existingByName.get(name.toLowerCase());
+    if(existing){
+      const newEvents = targetEventIds.filter(id=>!(existing.events||[]).includes(id));
+      if(newEvents.length) toUpdate.push({ guest: existing, newEvents, rsvpStatus });
+    } else {
+      const guest = {
+        id: uid(), name,
+        phone: col.phone ? String(row[col.phone]||'').trim() : '',
+        events: targetEventIds.slice(),
+        eventStatus: Object.fromEntries(targetEventIds.map(id=>[id, rsvpStatus])),
+        adults: col.adults ? (Number(row[col.adults]) || 1) : 1,
+        children: col.children ? (Number(row[col.children]) || 0) : 0,
+        notes: col.notes ? String(row[col.notes]||'').trim() : '',
+        bashorRaat: false
+      };
+      toImport.push(guest);
+      existingByName.set(name.toLowerCase(), guest);
+    }
   });
-  renderImportPreview(toImport, duplicates, skippedBlank);
+  renderImportPreview(toImport, toUpdate, skippedBlank, targetEventIds);
 }
-function renderImportPreview(toImport, duplicates, skippedBlank){
+function renderImportPreview(toImport, toUpdate, skippedBlank, targetEventIds){
+  const eventNames = targetEventIds.map(id=>eventById(id)?.name||'?').join(', ');
   const previewNames = toImport.slice(0,8).map(g=>escapeHtml(g.name)).join(', ') + (toImport.length>8 ? `, +${toImport.length-8} more` : '');
-  const dupNames = duplicates.slice(0,8).map(escapeHtml).join(', ') + (duplicates.length>8 ? `, +${duplicates.length-8} more` : '');
+  const updateNames = toUpdate.slice(0,8).map(u=>escapeHtml(u.guest.name)).join(', ') + (toUpdate.length>8 ? `, +${toUpdate.length-8} more` : '');
   openSheet(`
     <h3 class="serif">Ready to import</h3>
-    <div class="item" style="margin-bottom:8px;"><div class="item-title">${toImport.length} new guest${toImport.length===1?'':'s'}</div>
-      ${toImport.length ? `<div class="item-meta">${previewNames}</div>` : ''}</div>
-    ${duplicates.length ? `<div class="item" style="margin-bottom:8px;"><div class="item-title">${duplicates.length} skipped (already in your list)</div><div class="item-meta">${dupNames}</div></div>` : ''}
+    <p class="sheet-sub">Marking guests as invited to: ${escapeHtml(eventNames)}</p>
+    <div class="item" style="margin-bottom:8px;"><div class="item-title">${toImport.length} new guest${toImport.length===1?'':'s'}</div>${toImport.length ? `<div class="item-meta">${previewNames}</div>` : ''}</div>
+    ${toUpdate.length ? `<div class="item" style="margin-bottom:8px;"><div class="item-title">${toUpdate.length} existing guest${toUpdate.length===1?'':'s'} will be updated</div><div class="item-meta">${updateNames} — adding this event to their invitation</div></div>` : ''}
     ${skippedBlank ? `<div class="item-meta" style="margin-bottom:8px;">${skippedBlank} row(s) skipped — no name found.</div>` : ''}
     <div class="sheet-actions">
       <button class="btn btn-ghost" id="cancelBtn">Cancel</button>
-      <button class="btn btn-primary" id="confirmImportBtn" ${toImport.length?'':'disabled'}>Import ${toImport.length}</button>
+      <button class="btn btn-primary" id="confirmImportBtn" ${toImport.length||toUpdate.length?'':'disabled'}>Import &amp; update</button>
     </div>
   `);
   document.getElementById('cancelBtn').onclick = closeSheet;
   document.getElementById('confirmImportBtn').onclick = ()=>{
     state.guests.push(...toImport);
+    toUpdate.forEach(u=>{
+      u.guest.events = [...(u.guest.events||[]), ...u.newEvents];
+      u.guest.eventStatus = u.guest.eventStatus || {};
+      u.newEvents.forEach(id=>{ u.guest.eventStatus[id] = u.rsvpStatus; });
+    });
     saveData(); closeSheet(); renderAll();
-    toast(`${toImport.length} guest${toImport.length===1?'':'s'} imported`);
+    toast(`${toImport.length} added, ${toUpdate.length} updated`);
   };
 }
 
 function renderGuests(){
   const list = document.getElementById('guestList');
   let items = [...state.guests].sort((a,b)=>a.name.localeCompare(b.name));
-  if(guestFilter==='confirmed') items = items.filter(g=>g.rsvp==='confirmed');
-  if(guestFilter==='pending') items = items.filter(g=>g.rsvp==='pending');
-  if(guestFilter==='declined') items = items.filter(g=>g.rsvp==='declined');
-  if(guestFilter==='full') items = items.filter(g=>g.cohort==='FULL');
-  if(guestFilter==='reception') items = items.filter(g=>g.cohort==='RECEPTION');
+  if(guestFilter!=='all') items = items.filter(g=>overallGuestStatus(g)===guestFilter);
   list.innerHTML='';
   if(items.length===0){ list.innerHTML = emptyState('No guests here','Tap + to add a guest.'); return; }
   const cycle = { pending:'confirmed', confirmed:'declined', declined:'pending' };
   items.forEach(g=>{
+    const dots = (g.events||[]).map(id=>{
+      const ev = eventById(id);
+      if(!ev) return '';
+      const st = (g.eventStatus||{})[id] || 'pending';
+      return `<span class="event-dot ${st}" data-cycle-event="${g.id}|${id}" title="${escapeAttr(ev.name)}"><span class="dot"></span>${escapeHtml(ev.name)}</span>`;
+    }).join('');
     const el = document.createElement('div');
     el.className='item';
     el.innerHTML = `
       <div class="item-top">
         <div>
-          <div class="item-title">${escapeHtml(g.name)}</div>
-          <div class="item-meta">${g.cohort==='FULL'?'Full wedding':'Reception only'} · ${(Number(g.adults)||0)+(Number(g.children)||0)} people</div>
+          <div class="item-title">${escapeHtml(g.name)}${g.bashorRaat?' 🌙':''}</div>
+          <div class="item-meta">${(Number(g.adults)||0)+(Number(g.children)||0)} people</div>
         </div>
-        <span class="badge tappable ${g.rsvp==='confirmed'?'confirmed':g.rsvp==='declined'?'declined':'pending'}" data-cycle-rsvp="${g.id}">${g.rsvp[0].toUpperCase()+g.rsvp.slice(1)}</span>
-      </div>`;
-    el.addEventListener('click', (e)=>{ if(e.target.closest('[data-cycle-rsvp]')) return; openGuestForm(g); });
-    el.querySelector('[data-cycle-rsvp]').addEventListener('click', (e)=>{
-      e.stopPropagation();
-      g.rsvp = cycle[g.rsvp] || 'pending';
-      saveData(); renderAll();
+      </div>
+      <div class="event-dots">${dots}</div>`;
+    el.addEventListener('click', (e)=>{ if(e.target.closest('[data-cycle-event]')) return; openGuestForm(g); });
+    el.querySelectorAll('[data-cycle-event]').forEach(dot=>{
+      dot.addEventListener('click', (e)=>{
+        e.stopPropagation();
+        const [gid, evId] = dot.dataset.cycleEvent.split('|');
+        const guest = state.guests.find(x=>x.id===gid);
+        guest.eventStatus[evId] = cycle[guest.eventStatus[evId]] || 'pending';
+        saveData(); renderAll();
+      });
     });
     list.appendChild(el);
   });
 }
 function openGuestForm(guest){
   const isEdit = !!guest;
-  guest = guest || { id: uid(), name:'', phone:'', cohort:'FULL', rsvp:'pending', adults:1, children:0, notes:'' };
-  openSheet(`
-    <h3 class="serif">${isEdit?'Edit guest':'New guest'}</h3>
-    <div class="field"><label>Name</label><input id="g_name" value="${escapeAttr(guest.name)}" placeholder="e.g. Debashish Roy"></div>
-    <div class="field-row">
-      <div class="field"><label>Phone</label><input id="g_phone" value="${escapeAttr(guest.phone)}"></div>
-      <div class="field"><label>Invited to</label>
-        <select id="g_cohort">
-          <option value="FULL" ${guest.cohort==='FULL'?'selected':''}>Full Wedding</option>
-          <option value="RECEPTION" ${guest.cohort==='RECEPTION'?'selected':''}>Reception Only</option>
-        </select>
+  guest = guest || { id: uid(), name:'', phone:'', events:[], eventStatus:{}, adults:1, children:0, notes:'', bashorRaat:false };
+  guest.events = guest.events || [];
+  guest.eventStatus = guest.eventStatus || {};
+  const events = state.settings.events||[];
+
+  function statusRowsHtml(){
+    return guest.events.map(id=>{
+      const ev = eventById(id);
+      if(!ev) return '';
+      const st = guest.eventStatus[id]||'pending';
+      return `<div class="event-status-row">
+        <div class="ev-label">${escapeHtml(ev.name)}</div>
+        <div class="status-pills">
+          <button type="button" class="status-pill pending ${st==='pending'?'active':''}" data-status-for="${id}" data-status-val="pending">Pending</button>
+          <button type="button" class="status-pill confirmed ${st==='confirmed'?'active':''}" data-status-for="${id}" data-status-val="confirmed">Confirmed</button>
+          <button type="button" class="status-pill declined ${st==='declined'?'active':''}" data-status-for="${id}" data-status-val="declined">Declined</button>
+        </div>
+      </div>`;
+    }).join('') || '<p class="item-meta">Select at least one event above.</p>';
+  }
+  function bashorHtml(){
+    const invitedToMain = guest.events.some(id=> eventById(id)?.isMainWedding);
+    return invitedToMain ? `
+      <div class="toggle-row">
+        <div><div class="toggle-label">Staying for Bashor Raat?</div></div>
+        <label class="switch"><input type="checkbox" id="g_bashor" ${guest.bashorRaat?'checked':''}><span class="track"></span></label>
+      </div>` : '';
+  }
+
+  function draw(){
+    openSheet(`
+      <h3 class="serif">${isEdit?'Edit guest':'New guest'}</h3>
+      <div class="field"><label>Name</label><input id="g_name" value="${escapeAttr(guest.name)}" placeholder="e.g. Debashish Roy"></div>
+      <div class="field-row">
+        <div class="field"><label>Phone</label><input id="g_phone" value="${escapeAttr(guest.phone)}"></div>
       </div>
-    </div>
-    <div class="field-row">
-      <div class="field"><label>Adults</label><input type="number" min="0" id="g_adults" value="${guest.adults||0}"></div>
-      <div class="field"><label>Children</label><input type="number" min="0" id="g_children" value="${guest.children||0}"></div>
-    </div>
-    <div class="field"><label>RSVP</label>
-      <select id="g_rsvp">
-        <option value="pending" ${guest.rsvp==='pending'?'selected':''}>Pending</option>
-        <option value="confirmed" ${guest.rsvp==='confirmed'?'selected':''}>Confirmed</option>
-        <option value="declined" ${guest.rsvp==='declined'?'selected':''}>Declined</option>
-      </select>
-    </div>
-    <div class="field"><label>Notes</label><textarea id="g_notes">${escapeHtml(guest.notes||'')}</textarea></div>
-    <div class="sheet-actions">
-      ${isEdit? '<button class="btn btn-danger" id="deleteBtn">Delete</button>' : ''}
-      <button class="btn btn-ghost" id="cancelBtn">Cancel</button>
-      <button class="btn btn-primary" id="saveBtn">Save</button>
-    </div>
-  `);
-  document.getElementById('cancelBtn').onclick = closeSheet;
-  if(isEdit) document.getElementById('deleteBtn').onclick = ()=>{
-    state.guests = state.guests.filter(x=>x.id!==guest.id);
-    saveData(); closeSheet(); renderAll(); toast('Guest deleted');
-  };
-  document.getElementById('saveBtn').onclick = ()=>{
-    const name = document.getElementById('g_name').value.trim();
-    if(!name){ toast('Please enter a name'); return; }
-    guest.name = name;
-    guest.phone = document.getElementById('g_phone').value;
-    guest.cohort = document.getElementById('g_cohort').value;
-    guest.adults = Number(document.getElementById('g_adults').value)||0;
-    guest.children = Number(document.getElementById('g_children').value)||0;
-    guest.rsvp = document.getElementById('g_rsvp').value;
-    guest.notes = document.getElementById('g_notes').value;
-    if(!isEdit) state.guests.push(guest);
-    saveData(); closeSheet(); renderAll(); toast('Guest saved');
-  };
+      <div class="field-row">
+        <div class="field"><label>Adults</label><input type="number" min="0" id="g_adults" value="${guest.adults||0}"></div>
+        <div class="field"><label>Children</label><input type="number" min="0" id="g_children" value="${guest.children||0}"></div>
+      </div>
+      <div class="section-title" style="margin-top:4px;">Invited to</div>
+      <div class="chip-row" id="eventChips">${events.map(ev=>`<button type="button" class="chip maroon ${guest.events.includes(ev.id)?'active':''}" data-guest-event="${ev.id}">${escapeHtml(ev.name)}</button>`).join('')}</div>
+      <div class="section-title" style="margin-top:14px;">RSVP by event</div>
+      <div id="eventStatusRows">${statusRowsHtml()}</div>
+      <div id="bashorWrap">${bashorHtml()}</div>
+      <div class="field" style="margin-top:10px;"><label>Notes</label><textarea id="g_notes">${escapeHtml(guest.notes||'')}</textarea></div>
+      <div class="sheet-actions">
+        ${isEdit? '<button class="btn btn-danger" id="deleteBtn">Delete</button>' : ''}
+        <button class="btn btn-ghost" id="cancelBtn">Cancel</button>
+        <button class="btn btn-primary" id="saveBtn">Save</button>
+      </div>
+    `);
+    document.getElementById('cancelBtn').onclick = closeSheet;
+    sheetContent.querySelectorAll('[data-guest-event]').forEach(chip=>{
+      chip.addEventListener('click', ()=>{
+        const id = chip.dataset.guestEvent;
+        const idx = guest.events.indexOf(id);
+        if(idx>-1) guest.events.splice(idx,1); else { guest.events.push(id); if(!guest.eventStatus[id]) guest.eventStatus[id]='pending'; }
+        readFormIntoGuest();
+        draw();
+      });
+    });
+    sheetContent.querySelectorAll('[data-status-for]').forEach(btn=>{
+      btn.addEventListener('click', ()=>{
+        readFormIntoGuest();
+        guest.eventStatus[btn.dataset.statusFor] = btn.dataset.statusVal;
+        draw();
+      });
+    });
+    if(isEdit) document.getElementById('deleteBtn').onclick = ()=>{
+      state.guests = state.guests.filter(x=>x.id!==guest.id);
+      saveData(); closeSheet(); renderAll(); toast('Guest deleted');
+    };
+    document.getElementById('saveBtn').onclick = ()=>{
+      readFormIntoGuest();
+      if(!guest.name.trim()){ toast('Please enter a name'); return; }
+      if(!isEdit) state.guests.push(guest);
+      saveData(); closeSheet(); renderAll(); toast('Guest saved');
+    };
+  }
+  function readFormIntoGuest(){
+    const nameEl = document.getElementById('g_name');
+    if(nameEl) guest.name = nameEl.value.trim() || guest.name;
+    const phoneEl = document.getElementById('g_phone'); if(phoneEl) guest.phone = phoneEl.value;
+    const adultsEl = document.getElementById('g_adults'); if(adultsEl) guest.adults = Number(adultsEl.value)||0;
+    const childrenEl = document.getElementById('g_children'); if(childrenEl) guest.children = Number(childrenEl.value)||0;
+    const notesEl = document.getElementById('g_notes'); if(notesEl) guest.notes = notesEl.value;
+    const bashorEl = document.getElementById('g_bashor'); if(bashorEl) guest.bashorRaat = bashorEl.checked;
+  }
+  draw();
 }
 
 /* ================= SETTINGS ================= */
@@ -1094,13 +1213,6 @@ document.getElementById('saveSettingsBtn').addEventListener('click', ()=>{
   saveData(); renderAll(); toast('Settings saved');
 });
 document.getElementById('addEventBtn').addEventListener('click', ()=> openEventForm());
-document.getElementById('addPersonBtn').addEventListener('click', ()=>{
-  const name = prompt('Name to add:');
-  if(!name || !name.trim()) return;
-  if(!state.settings.peopleNames) state.settings.peopleNames = [];
-  state.settings.peopleNames.push(name.trim());
-  saveData(); renderAll(); toast('Person added');
-});
 document.getElementById('exportBtn').addEventListener('click', ()=>{
   const blob = new Blob([JSON.stringify(state, null, 2)], {type:'application/json'});
   const url = URL.createObjectURL(blob);
@@ -1117,7 +1229,7 @@ document.getElementById('importInput').addEventListener('change', (e)=>{
     try{
       const parsed = JSON.parse(reader.result);
       if(!confirm('This will replace all current data with the backup file. Continue?')) return;
-      state = deepMerge(structuredClone(DEFAULT_DATA), parsed);
+      state = normalizeState(deepMerge(structuredClone(DEFAULT_DATA), parsed), myUid());
       saveData(); renderAll(); toast('Backup restored');
     }catch(err){ toast('Could not read that file'); }
   };
@@ -1125,8 +1237,10 @@ document.getElementById('importInput').addEventListener('change', (e)=>{
   e.target.value = '';
 });
 document.getElementById('resetBtn').addEventListener('click', ()=>{
-  if(!confirm('This permanently erases all tasks, vendors, guests and expenses on this device. This cannot be undone. Continue?')) return;
+  if(!confirm('This permanently erases all tasks, vendors, guests and expenses. This cannot be undone. Continue?')) return;
+  const dir = state.directory;
   state = structuredClone(DEFAULT_DATA);
+  state.directory = dir;
   saveData(); renderAll(); toast('All data erased');
 });
 
@@ -1138,16 +1252,16 @@ function renderEventsSettingsList(){
   events.forEach(ev=>{
     const el = document.createElement('div');
     el.className='item';
-    el.innerHTML = `<div class="item-top">
-        <div><div class="item-title">${escapeHtml(ev.name)}</div><div class="item-meta">${ev.date?formatDate(ev.date):''}${ev.venue?' · '+escapeHtml(ev.venue):''}</div></div>
-      </div>`;
+    el.innerHTML = `<div class="item-top"><div><div class="item-title">${escapeHtml(ev.name)}${ev.isMainWedding?' 👑':''}</div><div class="item-meta">${ev.date?formatDate(ev.date):''}${ev.venue?' · '+escapeHtml(ev.venue):''}</div></div></div>`;
     el.addEventListener('click', ()=> openEventForm(ev));
     list.appendChild(el);
   });
 }
 function openEventForm(ev){
   const isEdit = !!ev;
-  ev = ev || { id: uid(), name:'', date:'', time:'', venue:'', address:'', audience:'FULL' };
+  ev = ev || { id: uid(), name:'', date:'', time:'', venue:'', address:'', isMainWedding:false, ownerId: myUid(), sharedWith:[] };
+  ev.sharedWith = ev.sharedWith || [];
+  if(!ev.ownerId) ev.ownerId = myUid();
   openSheet(`
     <h3 class="serif">${isEdit?'Edit event':'New event'}</h3>
     <div class="field"><label>Event name</label><input id="ev_name" value="${escapeAttr(ev.name)}" placeholder="e.g. Sangeet"></div>
@@ -1157,12 +1271,12 @@ function openEventForm(ev){
     </div>
     <div class="field"><label>Venue name</label><input id="ev_venue" value="${escapeAttr(ev.venue)}" placeholder="e.g. Taj Bengal"></div>
     <div class="field"><label>Address</label><input id="ev_address" value="${escapeAttr(ev.address)}" placeholder="Optional"></div>
-    <div class="field"><label>Who's invited</label>
-      <select id="ev_audience">
-        <option value="FULL" ${ev.audience==='FULL'?'selected':''}>Full Wedding guests</option>
-        <option value="ALL" ${ev.audience==='ALL'?'selected':''}>Everyone (Full Wedding + Reception Only)</option>
-      </select>
+    <div class="toggle-row">
+      <div><div class="toggle-label">This is the main Wedding day</div><div class="toggle-sub">Enables the Bashor Raat option for its guests</div></div>
+      <label class="switch"><input type="checkbox" id="ev_main" ${ev.isMainWedding?'checked':''}><span class="track"></span></label>
     </div>
+    <div class="section-title" style="margin-top:12px;">Sharing</div>
+    ${shareToggleHtml(ev, 'ev')}
     <div class="sheet-actions">
       ${isEdit? '<button class="btn btn-danger" id="deleteBtn">Delete</button>' : ''}
       <button class="btn btn-ghost" id="cancelBtn">Cancel</button>
@@ -1170,6 +1284,7 @@ function openEventForm(ev){
     </div>
   `);
   document.getElementById('cancelBtn').onclick = closeSheet;
+  wireShareToggle(ev, 'ev');
   if(isEdit) document.getElementById('deleteBtn').onclick = ()=>{
     state.settings.events = state.settings.events.filter(x=>x.id!==ev.id);
     saveData(); closeSheet(); renderAll(); toast('Event deleted');
@@ -1182,7 +1297,7 @@ function openEventForm(ev){
     ev.time = document.getElementById('ev_time').value;
     ev.venue = document.getElementById('ev_venue').value;
     ev.address = document.getElementById('ev_address').value;
-    ev.audience = document.getElementById('ev_audience').value;
+    ev.isMainWedding = document.getElementById('ev_main').checked;
     if(!state.settings.events) state.settings.events = [];
     if(!isEdit) state.settings.events.push(ev);
     saveData(); closeSheet(); renderAll(); toast('Event saved');
@@ -1191,22 +1306,13 @@ function openEventForm(ev){
 function renderPeopleList(){
   const list = document.getElementById('peopleList');
   list.innerHTML='';
-  peopleNames().forEach((name, idx)=>{
+  directoryList().forEach(p=>{
     const el = document.createElement('div');
     el.className='item';
-    el.style.display='flex'; el.style.justifyContent='space-between'; el.style.alignItems='center';
-    el.innerHTML = `<div class="item-title">${escapeHtml(name)}</div>`;
-    const delBtn = document.createElement('button');
-    delBtn.className='btn btn-danger btn-sm';
-    delBtn.textContent='Remove';
-    delBtn.addEventListener('click', ()=>{
-      if(!confirm(`Remove ${name}? This won't change past records that mention them.`)) return;
-      state.settings.peopleNames.splice(idx,1);
-      saveData(); renderAll();
-    });
-    el.appendChild(delBtn);
+    el.innerHTML = `<div class="item-title">${escapeHtml(p.name)}${p.uid===myUid()?' (you)':''}</div><div class="item-meta">${escapeHtml(p.email)}</div>`;
     list.appendChild(el);
   });
+  if(directoryList().length===0) list.innerHTML = emptyState('No one yet','You\'ll appear here after signing in.');
 }
 
 /* ---------------- Master render ---------------- */
@@ -1220,11 +1326,10 @@ function renderAll(){
   renderPeopleList();
   document.getElementById('settingWeddingDate').value = state.settings.weddingDate;
   document.getElementById('settingReceptionDate').value = state.settings.receptionDate;
-  document.getElementById('accountProfile').textContent = myProfile() || 'Not set';
 }
 renderAll();
+setTimeout(hideSplash, 2500); // safety net in case auth check is ever unusually slow
 
-/* ---------------- Service worker registration ---------------- */
 if('serviceWorker' in navigator){
   window.addEventListener('load', ()=>{ navigator.serviceWorker.register('sw.js').catch(()=>{}); });
 }

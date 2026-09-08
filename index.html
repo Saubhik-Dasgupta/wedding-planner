@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Saubhik &amp; Tanuka — Wedding Secretary</title>
-<meta name="theme-color" content="#1B2A3D">
+<meta name="theme-color" content="#7A2333">
 <link rel="manifest" href="manifest.json">
 <link rel="icon" href="icon-192.png">
 <link rel="apple-touch-icon" href="icon-192.png">
@@ -15,7 +15,8 @@
   :root{
     --ink:#1B2A3D; --ink-2:#233850;
     --gold:#C9A15F; --gold-soft:#E4CFA0; --gold-deep:#A9813F;
-    --maroon:#7A2333; --maroon-soft:#F0E0E2;
+    --maroon:#7A2333; --maroon-2:#5C1926; --maroon-soft:#F0E0E2;
+    --marigold:#E08D3C; --marigold-2:#C9642B;
     --sage:#4C6B63;
     --ivory:#FAF7F2; --paper:#FFFFFF; --line:#E7E1D6;
     --text:#2B2B28; --text-soft:#6B6459;
@@ -25,38 +26,28 @@
   }
   *{box-sizing:border-box;}
   html,body{margin:0;padding:0;}
-  body{
-    background:var(--ivory); color:var(--text); font-family:'Inter',system-ui,sans-serif;
-    -webkit-font-smoothing:antialiased; padding-bottom:78px;
-  }
+  body{ background:var(--ivory); color:var(--text); font-family:'Inter',system-ui,sans-serif; -webkit-font-smoothing:antialiased; padding-bottom:78px; }
   h1,h2,h3,.serif{ font-family:'Fraunces',serif; }
   @media (prefers-reduced-motion: reduce){ *{ animation:none !important; transition:none !important; } }
 
-  /* ---------- Hero (decorated) ---------- */
-  .hero{
-    position:relative; overflow:hidden;
-    background:linear-gradient(160deg,var(--ink) 0%, var(--ink-2) 100%);
-    color:var(--ivory); padding:30px 22px 24px; border-radius:0 0 28px 28px;
-    box-shadow:0 10px 30px rgba(27,42,61,.25);
-  }
-  .hero::before{
-    content:''; position:absolute; inset:-40px;
-    background-image:repeating-conic-gradient(from 0deg, rgba(201,161,95,.09) 0deg 6deg, transparent 6deg 24deg);
-    opacity:.7; pointer-events:none;
-  }
-  .hero::after{
-    content:''; position:absolute; left:0; right:0; bottom:0; height:3px;
-    background:linear-gradient(90deg, transparent, var(--gold), transparent);
-  }
+  /* ---------- Splash ---------- */
+  #appSplash{ position:fixed; inset:0; background:linear-gradient(160deg,var(--ink) 0%, var(--ink-2) 100%); z-index:200;
+    display:flex; align-items:center; justify-content:center; transition:opacity .3s ease; }
+  #appSplash.hidden{ opacity:0; pointer-events:none; }
+  #appSplash .serif{ color:var(--gold-soft); font-size:18px; }
+
+  /* ---------- Hero ---------- */
+  .hero{ position:relative; overflow:hidden; background:linear-gradient(160deg,var(--ink) 0%, var(--ink-2) 100%); color:var(--ivory);
+    padding:30px 22px 24px; border-radius:0 0 28px 28px; box-shadow:0 10px 30px rgba(27,42,61,.25); }
+  .hero::before{ content:''; position:absolute; inset:-40px;
+    background-image:repeating-conic-gradient(from 0deg, rgba(201,161,95,.09) 0deg 6deg, transparent 6deg 24deg); opacity:.7; pointer-events:none; }
+  .hero::after{ content:''; position:absolute; left:0; right:0; bottom:0; height:3px; background:linear-gradient(90deg, transparent, var(--gold), transparent); }
   .hero-inner{ position:relative; z-index:1; }
   .hero-names{ font-size:15px; letter-spacing:.03em; color:var(--gold-soft); margin:0 0 2px; display:flex; align-items:center; gap:7px; }
   .hero-names svg{ width:14px; height:14px; opacity:.85; }
   .hero-count-wrap{ position:relative; display:inline-block; margin:8px 0 2px; }
-  .hero-count-wrap::before{
-    content:''; position:absolute; left:50%; top:50%; width:150px; height:150px; transform:translate(-50%,-50%);
-    background:radial-gradient(circle, rgba(201,161,95,.22), transparent 70%); border-radius:50%;
-    animation:glow 3.4s ease-in-out infinite;
-  }
+  .hero-count-wrap::before{ content:''; position:absolute; left:50%; top:50%; width:150px; height:150px; transform:translate(-50%,-50%);
+    background:radial-gradient(circle, rgba(201,161,95,.22), transparent 70%); border-radius:50%; animation:glow 3.4s ease-in-out infinite; }
   @keyframes glow{ 0%,100%{ opacity:.55; } 50%{ opacity:1; } }
   .hero-count{ position:relative; display:flex; align-items:baseline; gap:10px; }
   .hero-count .num{ font-size:54px; font-weight:700; line-height:1; font-variant-numeric:tabular-nums; }
@@ -65,16 +56,47 @@
   .hero-dates{ display:flex; gap:16px; margin-top:14px; font-size:12.5px; color:#B9C3D1; flex-wrap:wrap; position:relative; }
   .hero-dates b{ color:var(--ivory); font-weight:600; }
 
-  /* ---------- Layout ---------- */
   .container{ max-width:640px; margin:0 auto; padding:16px; }
   .view{ display:none; animation:fadeIn .18s ease; }
   .view.active{ display:block; }
   @keyframes fadeIn{ from{opacity:0; transform:translateY(4px);} to{opacity:1; transform:none;} }
 
-  /* ---------- Section titles ---------- */
   .section-title{ font-size:13.5px; color:var(--text-soft); margin:22px 2px 10px; font-weight:600; display:flex; align-items:center; gap:7px; }
-  .section-title::before{ content:''; width:6px; height:6px; border-radius:1px; background:var(--gold); transform:rotate(45deg); flex:none; }
+  .section-title::before{ content:''; width:6px; height:6px; background:var(--gold); transform:rotate(45deg); flex:none; }
   .section-title .action{ margin-left:auto; font-weight:600; color:var(--gold-deep); cursor:pointer; }
+
+  /* ---------- Dashboard internal tabs ---------- */
+  .dash-tabs{ display:flex; gap:8px; margin-top:16px; }
+  .dash-tab{ flex:1; padding:11px; border-radius:12px; border:1.5px solid var(--line); background:var(--paper); font-size:14px; font-weight:700;
+    color:var(--text-soft); cursor:pointer; font-family:'Inter',sans-serif; transition:transform .15s cubic-bezier(.34,1.3,.64,1); }
+  .dash-tab:active{ transform:scale(.96); }
+  .dash-tab.active{ background:linear-gradient(135deg,var(--maroon),var(--maroon-2)); border-color:var(--maroon); color:#fff; }
+  .dash-pane{ display:none; }
+  .dash-pane.active{ display:block; }
+
+  /* ---------- Celebrations decoration ---------- */
+  .garland{ height:22px; margin:16px -16px 0; background-image:
+      radial-gradient(circle at 11px 15px, var(--marigold) 0 6px, transparent 7px),
+      radial-gradient(circle at 11px 15px, var(--marigold-2) 0 3px, transparent 4px);
+    background-size:22px 22px; background-repeat:repeat-x; opacity:.9; }
+  .garland-thread{ height:6px; margin:0 -16px; background:linear-gradient(180deg, var(--gold-deep), transparent); opacity:.5; }
+  .celebrations-hero{ text-align:center; padding:14px 10px 4px; }
+  .celebrations-hero .serif{ font-size:15px; color:var(--maroon); letter-spacing:.04em; }
+  .event-card{ position:relative; background:linear-gradient(180deg,#fff, #FFFBF4); border:1px solid var(--line); border-radius:18px;
+    padding:16px 18px 16px 20px; margin-bottom:12px; box-shadow:0 6px 18px rgba(122,35,51,.08); overflow:hidden; }
+  .event-card::before{ content:''; position:absolute; left:0; top:0; bottom:0; width:6px; background:linear-gradient(var(--marigold),var(--maroon)); }
+  .event-card::after{ content:''; position:absolute; right:-14px; top:-14px; width:60px; height:60px; border-radius:50%;
+    background:radial-gradient(circle, rgba(224,141,60,.18), transparent 70%); }
+  .event-top{ display:flex; justify-content:space-between; align-items:flex-start; gap:10px; position:relative; z-index:1; }
+  .event-name{ font-family:'Fraunces',serif; font-size:19px; font-weight:700; color:var(--maroon); }
+  .event-when{ font-size:12.5px; color:var(--gold-deep); font-weight:700; white-space:nowrap; }
+  .event-meta{ font-size:12.5px; color:var(--text-soft); margin-top:6px; display:flex; align-items:flex-start; gap:6px; position:relative; z-index:1; }
+  .event-meta svg{ width:14px; height:14px; flex:none; margin-top:1px; opacity:.7; }
+  .event-count{ display:inline-flex; align-items:center; gap:5px; margin-top:9px; font-size:12.5px; color:var(--sage); font-weight:700;
+    background:#EAF1EE; padding:4px 11px; border-radius:99px; position:relative; z-index:1; }
+  .event-bashor{ display:inline-flex; align-items:center; gap:5px; margin-top:9px; margin-left:6px; font-size:12.5px; color:var(--maroon);
+    font-weight:700; background:var(--maroon-soft); padding:4px 11px; border-radius:99px; position:relative; z-index:1; }
+  .event-shared{ font-size:10.5px; background:#EAF1EE; color:var(--sage); padding:2px 8px; border-radius:99px; font-weight:700; }
 
   /* ---------- Stat cards ---------- */
   .stat-grid{ display:grid; grid-template-columns:repeat(2,1fr); gap:10px; margin-top:14px; }
@@ -84,7 +106,6 @@
   .stat-card .label{ font-size:12.5px; color:var(--text-soft); margin-bottom:6px; font-weight:500; }
   .stat-card .value{ font-family:'Fraunces',serif; font-size:24px; font-weight:600; color:var(--ink); font-variant-numeric:tabular-nums; }
   .stat-card .sub{ font-size:12px; color:var(--text-soft); margin-top:2px; }
-  .stat-card.locked .value{ color:var(--text-soft); font-size:15px; }
 
   .hero-stat{ background:linear-gradient(135deg,var(--ink) 0%, var(--ink-2) 100%); border-radius:18px; padding:18px 20px; margin-top:14px;
     box-shadow:0 8px 24px rgba(27,42,61,.22); position:relative; overflow:hidden; }
@@ -97,17 +118,6 @@
   .stat-strip > div:last-child{ border-right:none; }
   .stat-strip .label{ font-size:11px; color:var(--text-soft); margin-bottom:3px; }
   .stat-strip .value{ font-family:'Fraunces',serif; font-size:17px; font-weight:600; color:var(--ink); font-variant-numeric:tabular-nums; }
-
-  /* ---------- Events (Dashboard) ---------- */
-  .event-card{ position:relative; background:var(--paper); border:1px solid var(--line); border-radius:16px; padding:14px 16px 14px 18px;
-    margin-bottom:10px; box-shadow:var(--shadow); overflow:hidden; }
-  .event-card::before{ content:''; position:absolute; left:0; top:0; bottom:0; width:5px; background:linear-gradient(var(--gold),var(--maroon)); }
-  .event-top{ display:flex; justify-content:space-between; align-items:flex-start; gap:10px; }
-  .event-name{ font-family:'Fraunces',serif; font-size:17px; font-weight:600; color:var(--ink); }
-  .event-when{ font-size:12.5px; color:var(--gold-deep); font-weight:600; white-space:nowrap; }
-  .event-meta{ font-size:12.5px; color:var(--text-soft); margin-top:6px; display:flex; align-items:flex-start; gap:6px; }
-  .event-meta svg{ width:14px; height:14px; flex:none; margin-top:1px; opacity:.7; }
-  .event-count{ display:inline-flex; align-items:center; gap:5px; margin-top:8px; font-size:12.5px; color:var(--sage); font-weight:600; background:#EAF1EE; padding:3px 10px; border-radius:99px; }
 
   .alert{ display:flex; gap:10px; align-items:flex-start; background:#FFF3EC; border:1px solid #F0D2BE; border-radius:12px; padding:12px 14px;
     margin-bottom:8px; font-size:13.5px; color:#7A3E1F; cursor:pointer; transition:transform .15s cubic-bezier(.34,1.3,.64,1); }
@@ -148,6 +158,16 @@
   .priority-dot{ width:8px; height:8px; border-radius:50%; display:inline-block; margin-right:6px; }
   .p-low{ background:#B7C4CC; } .p-medium{ background:var(--gold); } .p-high{ background:#D98A3D; } .p-critical{ background:var(--danger); }
 
+  /* per-event guest dots */
+  .event-dots{ display:flex; gap:5px; margin-top:7px; flex-wrap:wrap; }
+  .event-dot{ display:inline-flex; align-items:center; gap:4px; font-size:10.5px; font-weight:700; padding:3px 8px; border-radius:99px;
+    cursor:pointer; transition:transform .15s cubic-bezier(.34,1.3,.64,1); border:1.5px solid transparent; }
+  .event-dot:active{ transform:scale(.88); }
+  .event-dot.pending{ background:#EFE6D4; color:#8A6A2E; }
+  .event-dot.confirmed{ background:#E1EEE6; color:#2E6B4A; }
+  .event-dot.declined{ background:#F0E4E4; color:#8A3A3A; }
+  .event-dot .dot{ width:6px; height:6px; border-radius:50%; background:currentColor; }
+
   .empty-state{ text-align:center; padding:44px 20px; color:var(--text-soft); }
   .empty-state .empty-icon{ width:48px; height:48px; margin:0 auto 14px; opacity:.5; animation:float 2.6s ease-in-out infinite; }
   .empty-state .serif{ font-size:19px; color:var(--ink); margin-bottom:6px; }
@@ -168,20 +188,18 @@
     transition:transform .18s cubic-bezier(.34,1.5,.64,1); }
   .fab:active{ transform:scale(.88) rotate(-8deg); }
 
-  /* ---------- Bottom nav ---------- */
   .bottom-nav{ position:fixed; bottom:0; left:0; right:0; background:var(--paper); border-top:1px solid var(--line); display:flex;
     justify-content:space-around; padding:8px 4px 10px; z-index:30; }
   .nav-btn{ position:relative; background:none; border:none; display:flex; flex-direction:column; align-items:center; gap:3px; color:var(--text-soft);
     font-size:10.5px; font-family:'Inter',sans-serif; padding:6px 10px; cursor:pointer; transition:color .2s ease, transform .15s cubic-bezier(.34,1.3,.64,1); }
   .nav-btn:active{ transform:scale(.9); }
-  .nav-btn.active{ color:var(--ink); }
-  .nav-btn::before{ content:''; position:absolute; top:-2px; left:50%; width:28px; height:3px; border-radius:3px; background:var(--gold);
+  .nav-btn.active{ color:var(--maroon); }
+  .nav-btn::before{ content:''; position:absolute; top:-2px; left:50%; width:28px; height:3px; border-radius:3px; background:var(--marigold);
     transform:translateX(-50%) scaleX(0); transition:transform .25s cubic-bezier(.34,1.3,.64,1); }
   .nav-btn.active::before{ transform:translateX(-50%) scaleX(1); }
   .nav-icon{ width:22px; height:22px; transition:transform .2s cubic-bezier(.34,1.5,.64,1); }
   .nav-btn.active .nav-icon{ transform:translateY(-1px); }
 
-  /* ---------- Sheet ---------- */
   .sheet-backdrop{ position:fixed; inset:0; background:rgba(20,30,44,.5); backdrop-filter:blur(2px); display:none; align-items:flex-end; z-index:50;
     animation:backdropIn .18s ease; }
   @keyframes backdropIn{ from{opacity:0;} to{opacity:1;} }
@@ -219,6 +237,17 @@
     cursor:pointer; font-family:'Inter',sans-serif; font-weight:600; transition:transform .15s cubic-bezier(.34,1.3,.64,1); }
   .chip:active{ transform:scale(.93); }
   .chip.active{ background:var(--sage); border-color:var(--sage); color:#fff; }
+  .chip.maroon.active{ background:var(--maroon); border-color:var(--maroon); }
+
+  .event-status-row{ display:flex; align-items:center; justify-content:space-between; padding:8px 0; border-bottom:1px solid var(--line); }
+  .event-status-row:last-child{ border-bottom:none; }
+  .event-status-row .ev-label{ font-size:13.5px; font-weight:600; color:var(--ink); }
+  .status-pills{ display:flex; gap:5px; }
+  .status-pill{ padding:5px 10px; border-radius:99px; border:1.5px solid var(--line); background:var(--paper); font-size:11px; font-weight:700;
+    color:var(--text-soft); cursor:pointer; font-family:'Inter',sans-serif; }
+  .status-pill.active.pending{ background:#EFE6D4; border-color:#EFE6D4; color:#8A6A2E; }
+  .status-pill.active.confirmed{ background:#E1EEE6; border-color:#E1EEE6; color:#2E6B4A; }
+  .status-pill.active.declined{ background:#F0E4E4; border-color:#F0E4E4; color:#8A3A3A; }
 
   .status-toggle{ display:flex; gap:8px; margin-bottom:14px; }
   .status-toggle button{ flex:1; padding:12px; border-radius:12px; border:1.5px solid var(--line); background:var(--paper); font-size:14px;
@@ -251,27 +280,24 @@
   .settings-row{ background:var(--paper); border:1px solid var(--line); border-radius:12px; padding:14px 16px; margin-bottom:10px; }
   .settings-row .label{ font-size:12px; color:var(--text-soft); margin-bottom:2px; }
 
-  #loginScreen, #profilePicker{ position:fixed; inset:0; background:linear-gradient(160deg,var(--ink) 0%, var(--ink-2) 100%);
-    z-index:100; display:flex; align-items:center; justify-content:center; padding:24px; }
-  #loginScreen.hidden, #profilePicker.hidden{ display:none; }
+  #loginScreen{ position:fixed; inset:0; background:linear-gradient(160deg,var(--ink) 0%, var(--ink-2) 100%); z-index:100; display:flex;
+    align-items:center; justify-content:center; padding:24px; }
+  #loginScreen.hidden{ display:none; }
   .login-card{ width:100%; max-width:340px; }
   .login-card .brand{ color:var(--gold-soft); font-size:14px; letter-spacing:.04em; margin-bottom:4px; }
   .login-card h1{ color:var(--ivory); font-size:26px; margin:0 0 22px; }
-  .login-card p.hint{ color:#C9D2DE; font-size:13.5px; margin-bottom:18px; line-height:1.5; }
   .login-card .field label{ color:#C9D2DE; }
   .login-card .field input{ background:rgba(255,255,255,.06); border-color:rgba(255,255,255,.18); color:var(--ivory); }
   .login-card .field input::placeholder{ color:#8593A6; }
   .login-error{ color:#F0A78A; font-size:13px; margin-top:4px; min-height:16px; }
-  .profile-choice{ display:flex; flex-direction:column; gap:10px; }
-  .profile-choice button{ padding:16px; border-radius:14px; border:1.5px solid rgba(255,255,255,.2); background:rgba(255,255,255,.06);
-    color:var(--ivory); font-size:17px; font-family:'Fraunces',serif; font-weight:600; cursor:pointer; transition:transform .15s cubic-bezier(.34,1.3,.64,1); }
-  .profile-choice button:active{ transform:scale(.96); }
   #syncStatus{ position:fixed; top:10px; right:10px; font-size:11px; padding:4px 10px; border-radius:99px; z-index:40;
     background:rgba(27,42,61,.85); color:var(--gold-soft); display:none; }
   #syncStatus.show{ display:block; }
 </style>
 </head>
 <body>
+
+<div id="appSplash"><p class="serif">Wedding Secretary</p></div>
 
 <div id="loginScreen">
   <div class="login-card">
@@ -281,15 +307,6 @@
     <div class="field"><label>Password</label><input type="password" id="login_password" autocomplete="current-password" placeholder="••••••••"></div>
     <div class="login-error" id="loginError"></div>
     <button class="btn btn-primary" id="loginBtn" style="width:100%;margin-top:6px;">Sign in</button>
-  </div>
-</div>
-
-<div id="profilePicker" class="hidden">
-  <div class="login-card">
-    <p class="brand serif">Wedding Secretary</p>
-    <h1 class="serif">Who's this?</h1>
-    <p class="hint">Pick your name so the app knows what's yours — this decides what's shown as "shared with you" in Finance. You can change this later in Settings.</p>
-    <div class="profile-choice" id="profileChoiceList"></div>
   </div>
 </div>
 
@@ -308,9 +325,7 @@
       </div>
     </div>
     <p class="hero-sub" id="weddingDateLine">until 14 March 2027</p>
-    <div class="hero-dates">
-      <span>Reception — <b id="receptionDateLine">17 March 2027</b></span>
-    </div>
+    <div class="hero-dates"><span>Reception — <b id="receptionDateLine">17 March 2027</b></span></div>
   </div>
 </div>
 
@@ -318,29 +333,40 @@
 
   <!-- DASHBOARD -->
   <div class="view active" id="view-dashboard">
-    <div class="section-title">Needs attention</div>
-    <div id="alertsBox"></div>
-
-    <div class="section-title">Your events</div>
-    <div id="eventsBox"></div>
-
-    <div class="section-title">Budget</div>
-    <div id="budgetBox"></div>
-
-    <div class="section-title">Guests</div>
-    <div class="stat-grid">
-      <div class="stat-card"><div class="label">Total</div><div class="value" id="statGuestTotal">0</div><div class="sub" id="statGuestPeople"></div></div>
-      <div class="stat-card"><div class="label">Confirmed</div><div class="value" id="statGuestConfirmed">0</div></div>
-      <div class="stat-card"><div class="label">Pending</div><div class="value" id="statGuestPending">0</div></div>
-      <div class="stat-card"><div class="label">Declined</div><div class="value" id="statGuestDeclined">0</div></div>
+    <div class="dash-tabs">
+      <button class="dash-tab active" data-dtab="celebrations">🎉 Celebrations</button>
+      <button class="dash-tab" data-dtab="overview">📊 Overview</button>
     </div>
 
-    <div class="section-title">Tasks</div>
-    <div class="stat-grid">
-      <div class="stat-card"><div class="label">Open</div><div class="value" id="statTaskOpen">0</div></div>
-      <div class="stat-card"><div class="label">Overdue</div><div class="value" id="statTaskOverdue">0</div></div>
-      <div class="stat-card"><div class="label">Completed</div><div class="value" id="statTaskDone">0</div></div>
-      <div class="stat-card"><div class="label">Total</div><div class="value" id="statTaskTotal">0</div></div>
+    <div class="dash-pane active" id="dash-celebrations">
+      <div class="garland"></div>
+      <div class="celebrations-hero"><p class="serif">✦ Our Wedding Functions ✦</p></div>
+      <div id="eventsBox"></div>
+      <div class="garland-thread"></div>
+    </div>
+
+    <div class="dash-pane" id="dash-overview">
+      <div class="section-title">Needs attention</div>
+      <div id="alertsBox"></div>
+
+      <div class="section-title">Budget</div>
+      <div id="budgetBox"></div>
+
+      <div class="section-title">Guests</div>
+      <div class="stat-grid">
+        <div class="stat-card"><div class="label">Total</div><div class="value" id="statGuestTotal">0</div><div class="sub" id="statGuestPeople"></div></div>
+        <div class="stat-card"><div class="label">Confirmed</div><div class="value" id="statGuestConfirmed">0</div></div>
+        <div class="stat-card"><div class="label">Pending</div><div class="value" id="statGuestPending">0</div></div>
+        <div class="stat-card"><div class="label">Declined</div><div class="value" id="statGuestDeclined">0</div></div>
+      </div>
+
+      <div class="section-title">Tasks</div>
+      <div class="stat-grid">
+        <div class="stat-card"><div class="label">Open</div><div class="value" id="statTaskOpen">0</div></div>
+        <div class="stat-card"><div class="label">Overdue</div><div class="value" id="statTaskOverdue">0</div></div>
+        <div class="stat-card"><div class="label">Completed</div><div class="value" id="statTaskDone">0</div></div>
+        <div class="stat-card"><div class="label">Total</div><div class="value" id="statTaskTotal">0</div></div>
+      </div>
     </div>
   </div>
 
@@ -384,8 +410,6 @@
       <button class="seg-btn" data-f="confirmed">Confirmed</button>
       <button class="seg-btn" data-f="pending">Pending</button>
       <button class="seg-btn" data-f="declined">Declined</button>
-      <button class="seg-btn" data-f="full">Full Wedding</button>
-      <button class="seg-btn" data-f="reception">Reception Only</button>
     </div>
     <div class="list" id="guestList"></div>
   </div>
@@ -406,20 +430,15 @@
     <div class="section-title">Events <span class="action" id="addEventBtn">+ Add event</span></div>
     <div class="list" id="eventsSettingsList"></div>
 
-    <div class="section-title">People</div>
-    <p style="font-size:12.5px;color:var(--text-soft);margin:0 0 8px;">Names used for payers and Finance sharing.</p>
+    <div class="section-title">People with access</div>
+    <p style="font-size:12.5px;color:var(--text-soft);margin:0 0 8px;">Everyone who has ever signed in. To add someone new, create their account in the Firebase console (see README) — they'll appear here after their first sign-in.</p>
     <div class="list" id="peopleList"></div>
-    <button class="btn btn-ghost" id="addPersonBtn" style="width:100%;margin-top:6px;margin-bottom:20px;">+ Add person</button>
+    <div style="height:20px;"></div>
 
     <div class="section-title">Account</div>
     <div class="settings-row">
       <div class="label">Signed in as</div>
       <div id="accountEmail" style="font-size:15px;font-family:'Fraunces',serif;">—</div>
-    </div>
-    <div class="settings-row">
-      <div class="label">Your profile</div>
-      <div id="accountProfile" style="font-size:15px;font-family:'Fraunces',serif;">—</div>
-      <button class="btn btn-ghost btn-sm" id="changeProfileBtn" style="margin-top:8px;">Change profile</button>
     </div>
     <button class="btn btn-ghost" id="signOutBtn" style="width:100%;margin-bottom:8px;">Sign out</button>
 
@@ -433,9 +452,9 @@
 
     <div class="section-title">About</div>
     <p style="font-size:13px;color:var(--text-soft);line-height:1.6;">
-      Your data syncs automatically to your private Firebase cloud database, so it's the same on every device you sign into.
-      It also works offline — changes made without a connection sync as soon as you're back online.
-      Export still makes a local backup file you can keep for safekeeping.
+      Your data syncs automatically to your private Firebase cloud database. Vendors, other expenses, and events are private to
+      whoever added them unless explicitly shared — look for the "Share" toggle on each. Tasks and the guest list are shared
+      between everyone with access. It also works offline — changes sync once you're back online.
     </p>
   </div>
 

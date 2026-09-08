@@ -160,6 +160,8 @@
   .badge.planned{ background:var(--amber-soft); color:#92650F; }
   .badge.paid{ background:var(--teal-soft); color:var(--teal-2); }
   .badge.locked{ background:var(--primary-soft); color:var(--primary); }
+  .tag-badge{ display:inline-block; font-size:10.5px; font-weight:700; padding:3px 9px; border-radius:99px; background:var(--gold-soft); color:var(--gold-2); vertical-align:middle; margin-left:2px; }
+  .family-row{ border-left:4px solid var(--gold); margin-left:10px; margin-bottom:9px; }
   .priority-dot{ width:8px; height:8px; border-radius:50%; display:inline-block; margin-right:6px; }
   .p-low{ background:#C7B8C0; } .p-medium{ background:var(--gold); } .p-high{ background:var(--marigold-2); } .p-critical{ background:var(--danger); }
 
@@ -413,7 +415,13 @@
 
   <!-- GUESTS -->
   <div class="view" id="view-guests">
-    <button class="btn btn-ghost" id="importGuestsBtn" style="width:100%;margin-bottom:11px;">Import from Excel/CSV</button>
+    <div style="display:flex;gap:8px;margin-bottom:11px;">
+      <button class="btn btn-ghost" id="importGuestsBtn" style="flex:1;">Import from Excel/CSV</button>
+      <button class="btn btn-ghost" id="filterByEventBtn" style="flex:none;position:relative;padding-left:16px;padding-right:16px;">
+        Events
+        <span id="eventFilterBadge" style="display:none;position:absolute;top:-6px;right:-6px;background:var(--primary);color:#fff;font-size:10px;font-weight:700;min-width:18px;height:18px;border-radius:99px;align-items:center;justify-content:center;line-height:1;">0</span>
+      </button>
+    </div>
     <div class="segmented" id="guestFilter">
       <button class="seg-btn active" data-f="all">All</button>
       <button class="seg-btn" data-f="confirmed">Confirmed</button>

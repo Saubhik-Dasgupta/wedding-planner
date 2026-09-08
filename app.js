@@ -112,6 +112,16 @@ function normalizeState(s, uid){
     g.eventStatus = g.eventStatus || {};
     g.events.forEach(id=>{ if(!g.eventStatus[id]) g.eventStatus[id] = g.rsvp || 'pending'; });
     if(g.bashorRaat === undefined) g.bashorRaat = false;
+    g.tag = g.tag || '';
+    g.family = (g.family||[]).map(m=>({
+      id: m.id || uid(),
+      name: m.name || '',
+      isChild: !!m.isChild,
+      events: (m.events||[]).filter(id=>allEventIds.includes(id)),
+      eventStatus: m.eventStatus || {},
+      bashorRaat: !!m.bashorRaat
+    }));
+    g.family.forEach(m=>{ m.events.forEach(id=>{ if(!m.eventStatus[id]) m.eventStatus[id] = 'pending'; }); });
   });
   (s.tasks||[]).forEach(t=>{}); // tasks are shared as-is, nothing to migrate
   return s;
@@ -331,12 +341,14 @@ function renderDashboard(){
   renderEventsBox();
   renderBudgetBox();
 
-  const totalPeople = state.guests.reduce((s,g)=>s+(Number(g.adults)||0)+(Number(g.children)||0),0);
-  document.getElementById('statGuestTotal').textContent = state.guests.length;
-  document.getElementById('statGuestPeople').textContent = totalPeople + ' people incl. children';
-  document.getElementById('statGuestConfirmed').textContent = state.guests.filter(g=>Object.values(g.eventStatus||{}).some(s=>s==='confirmed')).length;
-  document.getElementById('statGuestPending').textContent = state.guests.filter(g=>Object.values(g.eventStatus||{}).every(s=>s==='pending')).length;
-  document.getElementById('statGuestDeclined').textContent = state.guests.filter(g=>Object.values(g.eventStatus||{}).length && Object.values(g.eventStatus||{}).every(s=>s==='declined')).length;
+  const totalPeople = state.guests.reduce((s,g)=>s+(Number(g.adults)||0)+(Number(g.children)||0)+(g.family||[]).length,0);
+  const peopleCounts = { confirmed:0, pending:0, declined:0 };
+  state.guests.forEach(g=> peopleBreakdown(g).forEach(p=> peopleCounts[p.status] += p.count));
+  document.getElementById('statGuestTotal').textContent = totalPeople;
+  document.getElementById('statGuestPeople').textContent = `across ${state.guests.length} invitation${state.guests.length===1?'':'s'}`;
+  document.getElementById('statGuestConfirmed').textContent = peopleCounts.confirmed;
+  document.getElementById('statGuestPending').textContent = peopleCounts.pending;
+  document.getElementById('statGuestDeclined').textContent = peopleCounts.declined;
 
   const openTasks = state.tasks.filter(t=>t.status!=='done');
   const overdue = state.tasks.filter(t=> t.status!=='done' && t.dueDate && t.dueDate < todayISO());
@@ -383,8 +395,13 @@ function renderEventsBox(){
   const pinIcon = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 21s-6-5.5-6-10a6 6 0 0112 0c0 4.5-6 10-6 10z"/><circle cx="12" cy="11" r="2.2"/></svg>`;
   box.innerHTML = events.map(ev=>{
     const attendees = state.guests.filter(g=>(g.events||[]).includes(ev.id));
-    const count = attendees.reduce((s,g)=>s+(Number(g.adults)||0)+(Number(g.children)||0),0);
-    const bashorCount = ev.isMainWedding ? state.guests.filter(g=>g.bashorRaat && (g.events||[]).includes(ev.id)).length : 0;
+    const mainCount = attendees.reduce((s,g)=>s+(Number(g.adults)||0)+(Number(g.children)||0),0);
+    const familyCount = state.guests.reduce((s,g)=> s + (g.family||[]).filter(m=>(m.events||[]).includes(ev.id)).length, 0);
+    const count = mainCount + familyCount;
+    const bashorCount = ev.isMainWedding ? (
+      state.guests.filter(g=>g.bashorRaat && (g.events||[]).includes(ev.id)).length +
+      state.guests.reduce((s,g)=> s + (g.family||[]).filter(m=>m.bashorRaat && (m.events||[]).includes(ev.id)).length, 0)
+    ) : 0;
     return `<div class="event-card">
       <div class="event-top">
         <div class="event-name">${escapeHtml(ev.name)}${ev.sharedWith && ev.sharedWith.length ? ` <span class="event-shared">Shared</span>`:''}</div>
@@ -988,6 +1005,7 @@ function openExpenseForm(expense){
 
 /* ================= GUESTS (shared; per-event invite + RSVP) ================= */
 let guestFilter='all';
+let guestEventFilter = []; // event IDs to filter the guest list by; empty = show all
 document.querySelectorAll('#guestFilter .seg-btn').forEach(b=>{
   b.addEventListener('click', ()=>{
     guestFilter = b.dataset.f;
@@ -996,15 +1014,55 @@ document.querySelectorAll('#guestFilter .seg-btn').forEach(b=>{
     renderGuests();
   });
 });
+document.getElementById('filterByEventBtn').addEventListener('click', openEventFilterSheet);
+function updateEventFilterBadge(){
+  const badge = document.getElementById('eventFilterBadge');
+  if(guestEventFilter.length){ badge.textContent = guestEventFilter.length; badge.style.display='inline-flex'; }
+  else badge.style.display = 'none';
+}
+function openEventFilterSheet(){
+  const events = state.settings.events||[];
+  if(events.length===0){ toast('Add an event in Settings first'); return; }
+  const selected = new Set(guestEventFilter);
+  openSheet(`
+    <h3 class="serif">Filter by event</h3>
+    <p class="sheet-sub">Show guests invited to any of the selected events (main guest or a family member).</p>
+    <div class="chip-row" id="filterEventChips">${events.map(ev=>`<button type="button" class="chip ${selected.has(ev.id)?'active':''}" data-filter-event="${ev.id}">${escapeHtml(ev.name)}</button>`).join('')}</div>
+    <div class="sheet-actions">
+      <button class="btn btn-ghost" id="clearFilterBtn">Clear</button>
+      <button class="btn btn-primary" id="applyFilterBtn">Apply</button>
+    </div>
+  `);
+  sheetContent.querySelectorAll('[data-filter-event]').forEach(chip=>{
+    chip.addEventListener('click', ()=>{
+      const id = chip.dataset.filterEvent;
+      if(selected.has(id)){ selected.delete(id); chip.classList.remove('active'); }
+      else { selected.add(id); chip.classList.add('active'); }
+    });
+  });
+  document.getElementById('clearFilterBtn').onclick = ()=>{ guestEventFilter = []; updateEventFilterBadge(); closeSheet(); renderGuests(); };
+  document.getElementById('applyFilterBtn').onclick = ()=>{ guestEventFilter = Array.from(selected); updateEventFilterBadge(); closeSheet(); renderGuests(); };
+}
 document.getElementById('importGuestsBtn').addEventListener('click', openImportPicker);
 
 function eventById(id){ return (state.settings.events||[]).find(e=>e.id===id); }
-function overallGuestStatus(g){
-  const statuses = Object.values(g.eventStatus||{});
+function overallStatus(eventStatusMap){
+  const statuses = Object.values(eventStatusMap||{});
   if(statuses.length===0) return 'pending';
   if(statuses.every(s=>s==='confirmed')) return 'confirmed';
   if(statuses.every(s=>s==='declined')) return 'declined';
   return 'pending';
+}
+function overallGuestStatus(g){ return overallStatus(g.eventStatus); }
+/* Every individual person this guest entry represents: the main guest counts as
+   (adults+children) people at the guest's own overall status, and each named family
+   member counts as 1 person at their own independent status. */
+function peopleBreakdown(g){
+  const people = [];
+  const mainCount = (Number(g.adults)||0) + (Number(g.children)||0);
+  if(mainCount>0) people.push({ count: mainCount, status: overallGuestStatus(g) });
+  (g.family||[]).forEach(m=> people.push({ count: 1, status: overallStatus(m.eventStatus) }));
+  return people;
 }
 function normalizeHeader(h){ return String(h||'').toLowerCase().replace(/[^a-z0-9]/g,''); }
 function findColumn(headers, synonyms){ const normSyns = synonyms.map(normalizeHeader); return headers.find(h => normSyns.includes(normalizeHeader(h))); }
@@ -1089,7 +1147,9 @@ function processImportRows(rows, targetEventIds){
         adults: col.adults ? (Number(row[col.adults]) || 1) : 1,
         children: col.children ? (Number(row[col.children]) || 0) : 0,
         notes: col.notes ? String(row[col.notes]||'').trim() : '',
-        bashorRaat: false
+        bashorRaat: false,
+        tag: '',
+        family: []
       };
       toImport.push(guest);
       existingByName.set(name.toLowerCase(), guest);
@@ -1129,8 +1189,14 @@ function renderGuests(){
   const list = document.getElementById('guestList');
   let items = [...state.guests].sort((a,b)=>a.name.localeCompare(b.name));
   if(guestFilter!=='all') items = items.filter(g=>overallGuestStatus(g)===guestFilter);
+  if(guestEventFilter.length){
+    items = items.filter(g=>
+      (g.events||[]).some(id=>guestEventFilter.includes(id)) ||
+      (g.family||[]).some(m=>(m.events||[]).some(id=>guestEventFilter.includes(id)))
+    );
+  }
   list.innerHTML='';
-  if(items.length===0){ list.innerHTML = emptyState('No guests here','Tap + to add a guest.'); return; }
+  if(items.length===0){ list.innerHTML = emptyState('No guests here','Tap + to add a guest, or clear your filters.'); return; }
   const cycle = { pending:'confirmed', confirmed:'declined', declined:'pending' };
   items.forEach(g=>{
     const dots = (g.events||[]).map(id=>{
@@ -1139,13 +1205,15 @@ function renderGuests(){
       const st = (g.eventStatus||{})[id] || 'pending';
       return `<span class="event-dot ${st}" data-cycle-event="${g.id}|${id}" title="${escapeAttr(ev.name)}"><span class="dot"></span>${escapeHtml(ev.name)}</span>`;
     }).join('');
+    const allNames = [g.name, ...(g.family||[]).map(m=>m.name)].filter(Boolean).join(' + ');
+    const peopleCount = (Number(g.adults)||0)+(Number(g.children)||0)+(g.family||[]).length;
     const el = document.createElement('div');
     el.className='item';
     el.innerHTML = `
       <div class="item-top">
         <div>
-          <div class="item-title">${escapeHtml(g.name)}${g.bashorRaat?' 🌙':''}</div>
-          <div class="item-meta">${(Number(g.adults)||0)+(Number(g.children)||0)} people</div>
+          <div class="item-title">${escapeHtml(allNames)}${g.bashorRaat?' 🌙':''}${g.tag ? ` <span class="tag-badge">${escapeHtml(g.tag)}</span>` : ''}</div>
+          <div class="item-meta">${peopleCount} people${g.family && g.family.length ? ` · ${g.family.length} family member${g.family.length===1?'':'s'}`:''}</div>
         </div>
       </div>
       <div class="event-dots">${dots}</div>`;
@@ -1164,10 +1232,13 @@ function renderGuests(){
 }
 function openGuestForm(guest){
   const isEdit = !!guest;
-  guest = guest || { id: uid(), name:'', phone:'', events:[], eventStatus:{}, adults:1, children:0, notes:'', bashorRaat:false };
+  guest = guest || { id: uid(), name:'', phone:'', events:[], eventStatus:{}, adults:1, children:0, notes:'', bashorRaat:false, tag:'', family:[] };
   guest.events = guest.events || [];
   guest.eventStatus = guest.eventStatus || {};
+  guest.family = guest.family || [];
+  guest.tag = guest.tag || '';
   const events = state.settings.events||[];
+  let expandedFamilyId = null;
 
   function statusRowsHtml(){
     return guest.events.map(id=>{
@@ -1192,6 +1263,56 @@ function openGuestForm(guest){
         <label class="switch"><input type="checkbox" id="g_bashor" ${guest.bashorRaat?'checked':''}><span class="track"></span></label>
       </div>` : '';
   }
+  function familyMemberDotsHtml(m){
+    return (m.events||[]).map(id=>{
+      const ev = eventById(id); if(!ev) return '';
+      const st = (m.eventStatus||{})[id] || 'pending';
+      return `<span class="event-dot ${st}"><span class="dot"></span>${escapeHtml(ev.name)}</span>`;
+    }).join('') || '<span class="item-meta">Not invited to any event yet</span>';
+  }
+  function familySectionHtml(){
+    if(guest.family.length===0) return '<p class="item-meta" style="margin-bottom:8px;">No family members added yet — e.g. a spouse or child invited to different events than the main guest.</p>';
+    return guest.family.map(m=>{
+      const expanded = expandedFamilyId===m.id;
+      return `<div class="item family-row" data-family-card="${m.id}">
+        <div class="item-top">
+          <div class="item-title" style="cursor:pointer;" data-toggle-family="${m.id}">${escapeHtml(m.name)}${m.isChild?' (child)':''}</div>
+          <div style="display:flex;gap:6px;flex:none;">
+            <button type="button" class="btn btn-ghost btn-sm" data-rename-family="${m.id}">Rename</button>
+            <button type="button" class="btn btn-danger btn-sm" data-remove-family="${m.id}">Remove</button>
+          </div>
+        </div>
+        <div class="event-dots" data-toggle-family="${m.id}" style="cursor:pointer;">${familyMemberDotsHtml(m)}</div>
+        ${expanded ? `
+          <div class="section-title" style="margin-top:12px;">Invited to</div>
+          <div class="chip-row">${events.map(ev=>`<button type="button" class="chip maroon ${m.events.includes(ev.id)?'active':''}" data-fam-event="${m.id}|${ev.id}">${escapeHtml(ev.name)}</button>`).join('')}</div>
+          <div style="margin-top:10px;">${
+            m.events.map(id=>{
+              const ev = eventById(id); if(!ev) return '';
+              const st = m.eventStatus[id]||'pending';
+              return `<div class="event-status-row">
+                <div class="ev-label">${escapeHtml(ev.name)}</div>
+                <div class="status-pills">
+                  <button type="button" class="status-pill pending ${st==='pending'?'active':''}" data-fam-status="${m.id}|${id}|pending">Pending</button>
+                  <button type="button" class="status-pill confirmed ${st==='confirmed'?'active':''}" data-fam-status="${m.id}|${id}|confirmed">Confirmed</button>
+                  <button type="button" class="status-pill declined ${st==='declined'?'active':''}" data-fam-status="${m.id}|${id}|declined">Declined</button>
+                </div>
+              </div>`;
+            }).join('') || '<p class="item-meta">Pick at least one event above.</p>'
+          }</div>
+          ${m.events.some(id=>eventById(id)?.isMainWedding) ? `
+          <div class="toggle-row">
+            <div><div class="toggle-label">Staying for Bashor Raat?</div></div>
+            <label class="switch"><input type="checkbox" data-fam-bashor="${m.id}" ${m.bashorRaat?'checked':''}><span class="track"></span></label>
+          </div>` : ''}
+          <div class="toggle-row">
+            <div><div class="toggle-label">Child</div></div>
+            <label class="switch"><input type="checkbox" data-fam-ischild="${m.id}" ${m.isChild?'checked':''}><span class="track"></span></label>
+          </div>
+        ` : `<button type="button" class="btn btn-ghost btn-sm" style="margin-top:9px;" data-toggle-family="${m.id}">Edit invitations</button>`}
+      </div>`;
+    }).join('');
+  }
 
   function draw(){
     openSheet(`
@@ -1199,6 +1320,7 @@ function openGuestForm(guest){
       <div class="field"><label>Name</label><input id="g_name" value="${escapeAttr(guest.name)}" placeholder="e.g. Debashish Roy"></div>
       <div class="field-row">
         <div class="field"><label>Phone</label><input id="g_phone" value="${escapeAttr(guest.phone)}"></div>
+        <div class="field"><label>Invited by <span style="font-weight:400;color:var(--text-soft);">(optional)</span></label><input id="g_tag" value="${escapeAttr(guest.tag)}" placeholder="e.g. Dad, College friends"></div>
       </div>
       <div class="field-row">
         <div class="field"><label>Adults</label><input type="number" min="0" id="g_adults" value="${guest.adults||0}"></div>
@@ -1209,7 +1331,11 @@ function openGuestForm(guest){
       <div class="section-title" style="margin-top:14px;">RSVP by event</div>
       <div id="eventStatusRows">${statusRowsHtml()}</div>
       <div id="bashorWrap">${bashorHtml()}</div>
-      <div class="field" style="margin-top:10px;"><label>Notes</label><textarea id="g_notes">${escapeHtml(guest.notes||'')}</textarea></div>
+
+      <div class="section-title" style="margin-top:18px;">Family &amp; relatives <span class="action" id="addFamilyBtn">+ Add</span></div>
+      <div id="familySection">${familySectionHtml()}</div>
+
+      <div class="field" style="margin-top:14px;"><label>Notes</label><textarea id="g_notes">${escapeHtml(guest.notes||'')}</textarea></div>
       <div class="sheet-actions">
         ${isEdit? '<button class="btn btn-danger" id="deleteBtn">Delete</button>' : ''}
         <button class="btn btn-ghost" id="cancelBtn">Cancel</button>
@@ -1233,6 +1359,75 @@ function openGuestForm(guest){
         draw();
       });
     });
+    document.getElementById('addFamilyBtn').onclick = ()=>{
+      const name = prompt('Name of family member / relative:');
+      if(!name || !name.trim()) return;
+      readFormIntoGuest();
+      const member = { id: uid(), name: name.trim(), isChild:false, events:[], eventStatus:{}, bashorRaat:false };
+      guest.family.push(member);
+      expandedFamilyId = member.id;
+      draw();
+    };
+    sheetContent.querySelectorAll('[data-toggle-family]').forEach(elx=>{
+      elx.addEventListener('click', ()=>{
+        readFormIntoGuest();
+        const id = elx.dataset.toggleFamily;
+        expandedFamilyId = expandedFamilyId===id ? null : id;
+        draw();
+      });
+    });
+    sheetContent.querySelectorAll('[data-rename-family]').forEach(btn=>{
+      btn.addEventListener('click', (e)=>{
+        e.stopPropagation();
+        const m = guest.family.find(x=>x.id===btn.dataset.renameFamily);
+        const newName = prompt('Rename:', m.name);
+        if(newName && newName.trim()){ readFormIntoGuest(); m.name = newName.trim(); draw(); }
+      });
+    });
+    sheetContent.querySelectorAll('[data-remove-family]').forEach(btn=>{
+      btn.addEventListener('click', (e)=>{
+        e.stopPropagation();
+        if(!confirm('Remove this family member?')) return;
+        readFormIntoGuest();
+        const removedId = btn.dataset.removeFamily;
+        guest.family = guest.family.filter(x=>x.id!==removedId);
+        if(expandedFamilyId===removedId) expandedFamilyId = null;
+        draw();
+      });
+    });
+    sheetContent.querySelectorAll('[data-fam-event]').forEach(chip=>{
+      chip.addEventListener('click', ()=>{
+        const [mid, evId] = chip.dataset.famEvent.split('|');
+        const m = guest.family.find(x=>x.id===mid);
+        const idx = m.events.indexOf(evId);
+        if(idx>-1) m.events.splice(idx,1); else { m.events.push(evId); if(!m.eventStatus[evId]) m.eventStatus[evId]='pending'; }
+        readFormIntoGuest();
+        draw();
+      });
+    });
+    sheetContent.querySelectorAll('[data-fam-status]').forEach(btn=>{
+      btn.addEventListener('click', ()=>{
+        const [mid, evId, val] = btn.dataset.famStatus.split('|');
+        const m = guest.family.find(x=>x.id===mid);
+        m.eventStatus[evId] = val;
+        readFormIntoGuest();
+        draw();
+      });
+    });
+    sheetContent.querySelectorAll('[data-fam-bashor]').forEach(cb=>{
+      cb.addEventListener('change', ()=>{
+        readFormIntoGuest();
+        const m = guest.family.find(x=>x.id===cb.dataset.famBashor);
+        m.bashorRaat = cb.checked;
+      });
+    });
+    sheetContent.querySelectorAll('[data-fam-ischild]').forEach(cb=>{
+      cb.addEventListener('change', ()=>{
+        readFormIntoGuest();
+        const m = guest.family.find(x=>x.id===cb.dataset.famIschild);
+        m.isChild = cb.checked;
+      });
+    });
     if(isEdit) document.getElementById('deleteBtn').onclick = ()=>{
       state.guests = state.guests.filter(x=>x.id!==guest.id);
       saveData(); closeSheet(); renderAll(); toast('Guest deleted');
@@ -1248,6 +1443,7 @@ function openGuestForm(guest){
     const nameEl = document.getElementById('g_name');
     if(nameEl) guest.name = nameEl.value.trim() || guest.name;
     const phoneEl = document.getElementById('g_phone'); if(phoneEl) guest.phone = phoneEl.value;
+    const tagEl = document.getElementById('g_tag'); if(tagEl) guest.tag = tagEl.value.trim();
     const adultsEl = document.getElementById('g_adults'); if(adultsEl) guest.adults = Number(adultsEl.value)||0;
     const childrenEl = document.getElementById('g_children'); if(childrenEl) guest.children = Number(childrenEl.value)||0;
     const notesEl = document.getElementById('g_notes'); if(notesEl) guest.notes = notesEl.value;

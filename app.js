@@ -221,7 +221,7 @@ const money = (n) => '₹' + Math.round(Number(n)||0).toLocaleString('en-IN');
 const todayISO = () => new Date().toISOString().slice(0,10);
 function formatDate(iso){ if(!iso) return ''; const d = new Date(iso+'T00:00:00'); return d.toLocaleDateString('en-GB', {day:'numeric', month:'long', year:'numeric'}); }
 function formatDateShort(iso){ if(!iso) return ''; const d = new Date(iso+'T00:00:00'); return d.toLocaleDateString('en-GB', {day:'numeric', month:'short'}); }
-function emptyState(title, sub){ return `<div class="empty-state"><svg class="empty-icon" viewBox="0 0 24 24" fill="none" stroke="#6B6459" stroke-width="1.4"><circle cx="12" cy="12" r="9"/><path d="M9 10h.01M15 10h.01M8 15c1.2 1 2.5 1.5 4 1.5s2.8-.5 4-1.5"/></svg><div class="serif">${title}</div><div>${sub}</div></div>`; }
+function emptyState(title, sub){ return `<div class="empty-state"><svg class="empty-icon" viewBox="0 0 24 24" fill="none" stroke="#8A7480" stroke-width="1.4"><circle cx="12" cy="12" r="9"/><path d="M9 10h.01M15 10h.01M8 15c1.2 1 2.5 1.5 4 1.5s2.8-.5 4-1.5"/></svg><div class="serif">${title}</div><div>${sub}</div></div>`; }
 function escapeHtml(s){ return String(s??'').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function escapeAttr(s){ return escapeHtml(s); }
 function vendorName(id){ const v = state.vendors.find(v=>v.id===id); return v ? v.name : ''; }
@@ -543,7 +543,7 @@ function renderVendors(){
           <div class="item-title">${escapeHtml(v.name)}</div>
           <div class="item-meta">${escapeHtml(v.category||'Uncategorized')}${v.phone? ' · '+escapeHtml(v.phone):''}</div>
         </div>
-        ${v.sharedWith && v.sharedWith.length ? `<span class="badge" style="background:#EAF1EE;color:var(--sage);">Shared</span>` : ''}
+        ${v.sharedWith && v.sharedWith.length ? `<span class="badge" style="background:#DFF3EC;color:var(--sage);">Shared</span>` : ''}
       </div>
       ${canSeeIt ? `
         <div class="vendor-money">
@@ -663,7 +663,7 @@ function handleDocUpload(e, vendor){
   uploadToCloudinary(file)
     .then(data => {
       vendor.documents = vendor.documents || [];
-      vendor.documents.push({ name: file.name, url: data.secure_url, publicId: data.public_id, uploadedAt: todayISO() });
+      vendor.documents.push({ name: file.name, url: data.secure_url, publicId: data.public_id, bytes: data.bytes, uploadedAt: todayISO() });
       saveData(); toast('Document added');
       openVendorForm(vendor);
     })
@@ -683,6 +683,57 @@ function handleDocDelete(publicId, vendor){
   if(!confirm('Remove this document from the vendor? (It stays stored on Cloudinary, but will no longer show here.)')) return;
   vendor.documents = (vendor.documents||[]).filter(d=>d.publicId!==publicId);
   saveData(); toast('Document removed'); openVendorForm(vendor);
+}
+
+/* ---------------- Storage usage (tracked app-side; Cloudinary's real usage API needs a
+   secret key, which can't be called safely from the browser) ---------------- */
+const CLOUDINARY_FREE_LIMIT_BYTES = 25 * 1024 * 1024 * 1024; // 25GB free tier
+function bytesToSize(bytes){
+  if(!bytes) return 'size unknown';
+  const units = ['B','KB','MB','GB'];
+  let n = bytes, i = 0;
+  while(n >= 1024 && i < units.length-1){ n/=1024; i++; }
+  return `${n.toFixed(i===0?0:1)} ${units[i]}`;
+}
+function allDocuments(){
+  const docs = [];
+  state.vendors.forEach(v=>{
+    (v.documents||[]).forEach(d=> docs.push({ ...d, context: v.name, url:d.url, deleteFn: ()=>{ v.documents = v.documents.filter(x=>x.publicId!==d.publicId); saveData(); renderAll(); toast('Document removed'); } }));
+    (v.payments||[]).forEach(p=> (p.documents||[]).forEach(d=> docs.push({ ...d, context: `${v.name} — ${money(p.amount)} (${p.status})`, url:d.url, deleteFn: ()=>{ p.documents = p.documents.filter(x=>x.publicId!==d.publicId); saveData(); renderAll(); toast('Receipt removed'); } })));
+  });
+  return docs;
+}
+function renderStorage(){
+  const box = document.getElementById('storageBox');
+  if(!box) return;
+  const docs = allDocuments();
+  const totalBytes = docs.reduce((s,d)=>s+(Number(d.bytes)||0),0);
+  const pct = Math.min(100, (totalBytes/CLOUDINARY_FREE_LIMIT_BYTES)*100);
+  const unknownCount = docs.filter(d=>!d.bytes).length;
+  box.innerHTML = `
+    <div class="hero-stat" style="margin-top:0;">
+      <div class="label">Used of 25 GB free tier</div>
+      <div class="value">${bytesToSize(totalBytes)}</div>
+    </div>
+    <div class="progress-bar" style="margin-top:10px;height:8px;"><div style="width:${pct.toFixed(2)}%;"></div></div>
+    ${unknownCount ? `<div class="item-meta" style="margin-top:8px;">${unknownCount} file${unknownCount===1?'':'s'} uploaded before this feature existed don't have a recorded size — they're not counted above but still use real Cloudinary storage.</div>` : ''}
+    <div class="section-title" style="margin-top:18px;">Files (${docs.length})</div>
+    <div class="list" id="storageFileList"></div>
+  `;
+  const list = document.getElementById('storageFileList');
+  if(docs.length===0){ list.innerHTML = emptyState('No files yet','Documents attached to vendors or payments will show up here.'); return; }
+  docs.sort((a,b)=> (b.bytes||0)-(a.bytes||0));
+  docs.forEach(d=>{
+    const el = document.createElement('div');
+    el.className='item';
+    el.innerHTML = `
+      <div class="item-top">
+        <div style="min-width:0;"><div class="item-title" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(d.name)}</div><div class="item-meta">${escapeHtml(d.context)}</div></div>
+        <div style="text-align:right;flex:none;"><div style="font-weight:700;font-size:13px;">${bytesToSize(d.bytes)}</div></div>
+      </div>`;
+    el.addEventListener('click', ()=> window.open(d.url, '_blank', 'noopener'));
+    list.appendChild(el);
+  });
 }
 
 /* ================= FINANCE ================= */
@@ -882,7 +933,7 @@ function openPaymentDetail(payment, vendor){
     label.textContent = 'Uploading…';
     uploadToCloudinary(file).then(data=>{
       payment.documents = payment.documents || [];
-      payment.documents.push({ name:file.name, url:data.secure_url, publicId:data.public_id, uploadedAt: todayISO() });
+      payment.documents.push({ name:file.name, url:data.secure_url, publicId:data.public_id, bytes: data.bytes, uploadedAt: todayISO() });
       saveData(); toast('Receipt attached');
       openPaymentDetail(payment, vendor);
     }).catch(err=>{
@@ -1324,6 +1375,7 @@ function renderAll(){
   renderGuests();
   renderEventsSettingsList();
   renderPeopleList();
+  renderStorage();
   document.getElementById('settingWeddingDate').value = state.settings.weddingDate;
   document.getElementById('settingReceptionDate').value = state.settings.receptionDate;
 }

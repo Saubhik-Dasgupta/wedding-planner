@@ -1,4 +1,4 @@
-const CACHE_NAME = 'wedsec-v7'; // bump this string on every deploy to force old caches out
+const CACHE_NAME = 'wedsec-v8'; // bump this string on every deploy to force old caches out
 const ASSETS = [
   './',
   './index.html',

@@ -74,7 +74,7 @@ function saveData(){
 function showSyncStatus(on){ document.getElementById('syncStatus').classList.toggle('show', on); }
 
 /* ---------------- Migration: fixes data shaped by earlier versions of this app ---------------- */
-function normalizeState(s, uid){
+function normalizeState(s, ownerUidParam){
   s.directory = s.directory || {};
   s.settings = s.settings || {};
   s.settings.events = s.settings.events || [];
@@ -82,19 +82,19 @@ function normalizeState(s, uid){
   const looksLikeUid = (x) => typeof x === 'string' && x.length >= 20; // real Firebase UIDs are long; old data used short names
 
   (s.vendors||[]).forEach(v=>{
-    if(!v.ownerId) v.ownerId = uid; // claim legacy data for whoever opens it first after upgrading
+    if(!v.ownerId) v.ownerId = ownerUidParam; // claim legacy data for whoever opens it first after upgrading
     v.sharedWith = Array.isArray(v.sharedWith) ? v.sharedWith.filter(looksLikeUid) : [];
     v.payments = (v.payments||[]).map(p=>({ documents: [], ...p, status: p.status || 'paid' }));
     v.documents = v.documents || [];
     delete v.createdBy; delete v.visibility;
   });
   (s.otherExpenses||[]).forEach(e=>{
-    if(!e.ownerId) e.ownerId = uid;
+    if(!e.ownerId) e.ownerId = ownerUidParam;
     e.sharedWith = Array.isArray(e.sharedWith) ? e.sharedWith.filter(looksLikeUid) : [];
     delete e.createdBy; delete e.visibility;
   });
   s.settings.events.forEach(ev=>{
-    if(!ev.ownerId) ev.ownerId = uid;
+    if(!ev.ownerId) ev.ownerId = ownerUidParam;
     ev.sharedWith = Array.isArray(ev.sharedWith) ? ev.sharedWith.filter(looksLikeUid) : [];
     if('audience' in ev) delete ev.audience;
     if(ev.isMainWedding === undefined) ev.isMainWedding = /wedding/i.test(ev.name) && !/reception|haldi|vidaai|vidai|sangeet/i.test(ev.name);
@@ -122,6 +122,8 @@ function normalizeState(s, uid){
       bashorRaat: !!m.bashorRaat
     }));
     g.family.forEach(m=>{ m.events.forEach(id=>{ if(!m.eventStatus[id]) m.eventStatus[id] = 'pending'; }); });
+    if(!g.ownerId) g.ownerId = ownerUidParam; // claim legacy data for whoever opens it first after upgrading
+    g.sharedWith = Array.isArray(g.sharedWith) ? g.sharedWith.filter(looksLikeUid) : [];
   });
   (s.tasks||[]).forEach(t=>{}); // tasks are shared as-is, nothing to migrate
   return s;
@@ -263,6 +265,7 @@ function canSee(entity, uid){
 function visibleVendors(){ const me = myUid(); return state.vendors.filter(v=> canSee(v, me)); }
 function visibleExpenses(){ const me = myUid(); return state.otherExpenses.filter(e=> canSee(e, me)); }
 function visibleEvents(){ const me = myUid(); return (state.settings.events||[]).filter(e=> canSee(e, me)); }
+function visibleGuests(){ const me = myUid(); return state.guests.filter(g=> canSee(g, me)); }
 function allPaymentsFlat(){
   const rows = [];
   state.vendors.forEach(v=> (v.payments||[]).forEach(p=> rows.push({ ...p, vendorId: v.id, vendorName: v.name, vendorVisible: canSee(v, myUid()) })));
@@ -341,11 +344,12 @@ function renderDashboard(){
   renderEventsBox();
   renderBudgetBox();
 
-  const totalPeople = state.guests.reduce((s,g)=>s+(Number(g.adults)||0)+(Number(g.children)||0)+(g.family||[]).length,0);
+  const myGuests = visibleGuests();
+  const totalPeople = myGuests.reduce((s,g)=>s+(Number(g.adults)||0)+(Number(g.children)||0)+(g.family||[]).length,0);
   const peopleCounts = { confirmed:0, pending:0, declined:0 };
-  state.guests.forEach(g=> peopleBreakdown(g).forEach(p=> peopleCounts[p.status] += p.count));
+  myGuests.forEach(g=> peopleBreakdown(g).forEach(p=> peopleCounts[p.status] += p.count));
   document.getElementById('statGuestTotal').textContent = totalPeople;
-  document.getElementById('statGuestPeople').textContent = `across ${state.guests.length} invitation${state.guests.length===1?'':'s'}`;
+  document.getElementById('statGuestPeople').textContent = `across ${myGuests.length} invitation${myGuests.length===1?'':'s'}`;
   document.getElementById('statGuestConfirmed').textContent = peopleCounts.confirmed;
   document.getElementById('statGuestPending').textContent = peopleCounts.pending;
   document.getElementById('statGuestDeclined').textContent = peopleCounts.declined;
@@ -371,7 +375,7 @@ function renderDashboard(){
     });
   });
   if(days>=0 && days<=14){
-    const pendingGuests = state.guests.filter(g=>Object.values(g.eventStatus||{}).some(s=>s==='pending')).length;
+    const pendingGuests = visibleGuests().filter(g=>Object.values(g.eventStatus||{}).some(s=>s==='pending')).length;
     if(pendingGuests>0) alerts.push({type:'guests', text:`${pendingGuests} guests haven't responded — wedding is ${days} days away`});
   }
   alertsBox.innerHTML='';
@@ -394,13 +398,14 @@ function renderEventsBox(){
   if(events.length===0){ box.innerHTML = emptyState('No events yet', 'Add Haldi, Wedding, Reception and more in Settings.'); return; }
   const pinIcon = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 21s-6-5.5-6-10a6 6 0 0112 0c0 4.5-6 10-6 10z"/><circle cx="12" cy="11" r="2.2"/></svg>`;
   box.innerHTML = events.map(ev=>{
-    const attendees = state.guests.filter(g=>(g.events||[]).includes(ev.id));
+    const myGuests = visibleGuests();
+    const attendees = myGuests.filter(g=>(g.events||[]).includes(ev.id));
     const mainCount = attendees.reduce((s,g)=>s+(Number(g.adults)||0)+(Number(g.children)||0),0);
-    const familyCount = state.guests.reduce((s,g)=> s + (g.family||[]).filter(m=>(m.events||[]).includes(ev.id)).length, 0);
+    const familyCount = myGuests.reduce((s,g)=> s + (g.family||[]).filter(m=>(m.events||[]).includes(ev.id)).length, 0);
     const count = mainCount + familyCount;
     const bashorCount = ev.isMainWedding ? (
-      state.guests.filter(g=>g.bashorRaat && (g.events||[]).includes(ev.id)).length +
-      state.guests.reduce((s,g)=> s + (g.family||[]).filter(m=>m.bashorRaat && (m.events||[]).includes(ev.id)).length, 0)
+      myGuests.filter(g=>g.bashorRaat && (g.events||[]).includes(ev.id)).length +
+      myGuests.reduce((s,g)=> s + (g.family||[]).filter(m=>m.bashorRaat && (m.events||[]).includes(ev.id)).length, 0)
     ) : 0;
     return `<div class="event-card">
       <div class="event-top">
@@ -1127,7 +1132,7 @@ function processImportRows(rows, targetEventIds){
     notes: findColumn(headers, ['notes','note','remarks','comments','comment'])
   };
   if(!col.name){ document.getElementById('importError').textContent = 'Could not find a "Name" column in that file.'; return; }
-  const existingByName = new Map(state.guests.map(g=>[g.name.trim().toLowerCase(), g]));
+  const existingByName = new Map(visibleGuests().map(g=>[g.name.trim().toLowerCase(), g]));
   const toImport = []; const toUpdate = []; let skippedBlank = 0;
   rows.forEach(row=>{
     const name = String(row[col.name]||'').trim();
@@ -1149,7 +1154,9 @@ function processImportRows(rows, targetEventIds){
         notes: col.notes ? String(row[col.notes]||'').trim() : '',
         bashorRaat: false,
         tag: '',
-        family: []
+        family: [],
+        ownerId: myUid(),
+        sharedWith: []
       };
       toImport.push(guest);
       existingByName.set(name.toLowerCase(), guest);
@@ -1187,7 +1194,7 @@ function renderImportPreview(toImport, toUpdate, skippedBlank, targetEventIds){
 
 function renderGuests(){
   const list = document.getElementById('guestList');
-  let items = [...state.guests].sort((a,b)=>a.name.localeCompare(b.name));
+  let items = [...visibleGuests()].sort((a,b)=>a.name.localeCompare(b.name));
   if(guestFilter!=='all') items = items.filter(g=>overallGuestStatus(g)===guestFilter);
   if(guestEventFilter.length){
     items = items.filter(g=>
@@ -1212,7 +1219,7 @@ function renderGuests(){
     el.innerHTML = `
       <div class="item-top">
         <div>
-          <div class="item-title">${escapeHtml(allNames)}${g.bashorRaat?' 🌙':''}${g.tag ? ` <span class="tag-badge">${escapeHtml(g.tag)}</span>` : ''}</div>
+          <div class="item-title">${escapeHtml(allNames)}${g.bashorRaat?' 🌙':''}${g.tag ? ` <span class="tag-badge">${escapeHtml(g.tag)}</span>` : ''}${g.sharedWith && g.sharedWith.length ? ` <span class="badge" style="background:var(--teal-soft);color:var(--teal-2);">Shared</span>` : ''}</div>
           <div class="item-meta">${peopleCount} people${g.family && g.family.length ? ` · ${g.family.length} family member${g.family.length===1?'':'s'}`:''}</div>
         </div>
       </div>
@@ -1232,11 +1239,13 @@ function renderGuests(){
 }
 function openGuestForm(guest){
   const isEdit = !!guest;
-  guest = guest || { id: uid(), name:'', phone:'', events:[], eventStatus:{}, adults:1, children:0, notes:'', bashorRaat:false, tag:'', family:[] };
+  guest = guest || { id: uid(), name:'', phone:'', events:[], eventStatus:{}, adults:1, children:0, notes:'', bashorRaat:false, tag:'', family:[], ownerId: myUid(), sharedWith:[] };
   guest.events = guest.events || [];
   guest.eventStatus = guest.eventStatus || {};
   guest.family = guest.family || [];
   guest.tag = guest.tag || '';
+  guest.sharedWith = guest.sharedWith || [];
+  if(!guest.ownerId) guest.ownerId = myUid();
   const events = state.settings.events||[];
   let expandedFamilyId = null;
 
@@ -1317,6 +1326,7 @@ function openGuestForm(guest){
   function draw(){
     openSheet(`
       <h3 class="serif">${isEdit?'Edit guest':'New guest'}</h3>
+      ${isEdit && guest.ownerId && guest.ownerId!==myUid() ? `<p class="sheet-sub">Added by ${escapeHtml(nameFor(guest.ownerId))}, shared with you.</p>` : ''}
       <div class="field"><label>Name</label><input id="g_name" value="${escapeAttr(guest.name)}" placeholder="e.g. Debashish Roy"></div>
       <div class="field-row">
         <div class="field"><label>Phone</label><input id="g_phone" value="${escapeAttr(guest.phone)}"></div>
@@ -1335,6 +1345,9 @@ function openGuestForm(guest){
       <div class="section-title" style="margin-top:18px;">Family &amp; relatives <span class="action" id="addFamilyBtn">+ Add</span></div>
       <div id="familySection">${familySectionHtml()}</div>
 
+      <div class="section-title" style="margin-top:18px;">Sharing</div>
+      ${shareToggleHtml(guest, 'g')}
+
       <div class="field" style="margin-top:14px;"><label>Notes</label><textarea id="g_notes">${escapeHtml(guest.notes||'')}</textarea></div>
       <div class="sheet-actions">
         ${isEdit? '<button class="btn btn-danger" id="deleteBtn">Delete</button>' : ''}
@@ -1343,6 +1356,7 @@ function openGuestForm(guest){
       </div>
     `);
     document.getElementById('cancelBtn').onclick = closeSheet;
+    wireShareToggle(guest, 'g');
     sheetContent.querySelectorAll('[data-guest-event]').forEach(chip=>{
       chip.addEventListener('click', ()=>{
         const id = chip.dataset.guestEvent;
@@ -1493,13 +1507,13 @@ document.getElementById('resetBtn').addEventListener('click', ()=>{
 
 function renderEventsSettingsList(){
   const list = document.getElementById('eventsSettingsList');
-  const events = [...(state.settings.events||[])].sort((a,b)=>(a.date||'').localeCompare(b.date||''));
+  const events = [...visibleEvents()].sort((a,b)=>(a.date||'').localeCompare(b.date||''));
   list.innerHTML='';
-  if(events.length===0){ list.innerHTML = emptyState('No events yet','Add Haldi, Wedding, Reception, etc.'); return; }
+  if(events.length===0){ list.innerHTML = emptyState('No events yet','Add Haldi, Wedding, Reception, etc. — each can be shared or kept private, e.g. separate Haldi ceremonies per family.'); return; }
   events.forEach(ev=>{
     const el = document.createElement('div');
     el.className='item';
-    el.innerHTML = `<div class="item-top"><div><div class="item-title">${escapeHtml(ev.name)}${ev.isMainWedding?' 👑':''}</div><div class="item-meta">${ev.date?formatDate(ev.date):''}${ev.venue?' · '+escapeHtml(ev.venue):''}</div></div></div>`;
+    el.innerHTML = `<div class="item-top"><div><div class="item-title">${escapeHtml(ev.name)}${ev.isMainWedding?' 👑':''}${ev.sharedWith && ev.sharedWith.length ? ` <span class="event-shared">Shared</span>`:''}</div><div class="item-meta">${ev.date?formatDate(ev.date):''}${ev.venue?' · '+escapeHtml(ev.venue):''}</div></div></div>`;
     el.addEventListener('click', ()=> openEventForm(ev));
     list.appendChild(el);
   });
@@ -1511,6 +1525,7 @@ function openEventForm(ev){
   if(!ev.ownerId) ev.ownerId = myUid();
   openSheet(`
     <h3 class="serif">${isEdit?'Edit event':'New event'}</h3>
+    ${isEdit && ev.ownerId && ev.ownerId!==myUid() ? `<p class="sheet-sub">Added by ${escapeHtml(nameFor(ev.ownerId))}, shared with you.</p>` : ''}
     <div class="field"><label>Event name</label><input id="ev_name" value="${escapeAttr(ev.name)}" placeholder="e.g. Sangeet"></div>
     <div class="field-row">
       <div class="field"><label>Date</label><input type="date" id="ev_date" value="${ev.date||''}"></div>

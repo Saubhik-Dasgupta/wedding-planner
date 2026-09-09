@@ -760,6 +760,61 @@ body:not(.authenticated) .bottom-nav,body:not(.authenticated) .desktop-shell{dis
   .container{margin-left:326px!important;}
 }
 
+
+/* ================================================================
+   V6 NAVIGATION + DASHBOARD GRID CORRECTION
+   ================================================================ */
+@media (max-width:899px){
+  body.authenticated:not(.sheet-open) .bottom-nav{
+    display:grid!important;
+    visibility:visible!important;
+    opacity:1!important;
+  }
+}
+@media (min-width:900px){
+  body.authenticated .desktop-shell{
+    display:flex!important;
+    visibility:visible!important;
+    opacity:1!important;
+  }
+  body.authenticated .bottom-nav{display:none!important;}
+  body:not(.authenticated) .desktop-shell{display:none!important;}
+
+  /* A predictable two-column dashboard grid. Each heading sits directly
+     above the section it describes; no nth-of-type selectors are used. */
+  #dash-overview{
+    display:grid!important;
+    grid-template-columns:minmax(0,1.12fr) minmax(320px,.88fr)!important;
+    grid-template-areas:
+      "attention attention"
+      "budget guests"
+      "tasks tasks";
+    column-gap:22px!important;
+    row-gap:0!important;
+    align-items:start!important;
+  }
+  #attentionTitle{grid-area:attention;}
+  #alertsBox{grid-area:attention; margin-top:48px;}
+  #budgetTitle{grid-area:budget;}
+  #budgetBox{grid-area:budget; margin-top:48px;}
+  #guestsTitle{grid-area:guests;}
+  #guestsTitle + .stat-grid{grid-area:guests; margin-top:48px;}
+  #tasksTitle{grid-area:tasks; margin-top:24px!important;}
+  #tasksTitle + .stat-grid{grid-area:tasks; margin-top:72px;}
+
+  /* Prevent the stat cards from stretching into the neighbouring column. */
+  #dash-overview > .stat-grid{min-width:0;}
+  #dash-overview > #budgetBox{min-width:0;}
+  #dash-overview .stat-grid{grid-template-columns:repeat(4,minmax(0,1fr));}
+}
+@media (min-width:1200px){
+  #dash-overview{grid-template-columns:minmax(0,1.25fr) minmax(360px,.75fr)!important;}
+}
+@media (max-width:899px){
+  #dash-overview{display:block!important;}
+  #dash-overview > .section-title{margin-top:24px!important;}
+  #dash-overview > .stat-grid{margin-top:14px!important;}
+}
 </style>
 </head>
 <body>
@@ -852,13 +907,13 @@ body:not(.authenticated) .bottom-nav,body:not(.authenticated) .desktop-shell{dis
     </div>
 
     <div class="dash-pane" id="dash-overview">
-      <div class="section-title">Needs attention</div>
+      <div class="section-title" id="attentionTitle">Needs attention</div>
       <div id="alertsBox"></div>
 
-      <div class="section-title">Budget</div>
+      <div class="section-title" id="budgetTitle">Budget</div>
       <div id="budgetBox"></div>
 
-      <div class="section-title">Guests</div>
+      <div class="section-title" id="guestsTitle">Guests</div>
       <div class="stat-grid">
         <div class="stat-card"><div class="label">Total</div><div class="value" id="statGuestTotal">0</div><div class="sub" id="statGuestPeople"></div></div>
         <div class="stat-card"><div class="label">Confirmed</div><div class="value" id="statGuestConfirmed">0</div></div>
@@ -866,7 +921,7 @@ body:not(.authenticated) .bottom-nav,body:not(.authenticated) .desktop-shell{dis
         <div class="stat-card"><div class="label">Declined</div><div class="value" id="statGuestDeclined">0</div></div>
       </div>
 
-      <div class="section-title">Tasks</div>
+      <div class="section-title" id="tasksTitle">Tasks</div>
       <div class="stat-grid">
         <div class="stat-card"><div class="label">Open</div><div class="value" id="statTaskOpen">0</div></div>
         <div class="stat-card"><div class="label">Overdue</div><div class="value" id="statTaskOverdue">0</div></div>

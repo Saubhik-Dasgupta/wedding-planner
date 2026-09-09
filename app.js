@@ -27,6 +27,7 @@ const DEFAULT_DATA = {
   tasks: [],         // shared between everyone with access
   vendors: [],        // private by default (ownerId + sharedWith[uid])
   guests: [],         // shared between everyone with access; per-event invite/RSVP
+  menus: [],          // event-wise menus
   otherExpenses: []  // private by default (ownerId + sharedWith[uid])
 };
 
@@ -92,6 +93,12 @@ function normalizeState(s, ownerUidParam){
     if(!e.ownerId) e.ownerId = ownerUidParam;
     e.sharedWith = Array.isArray(e.sharedWith) ? e.sharedWith.filter(looksLikeUid) : [];
     delete e.createdBy; delete e.visibility;
+  });
+  s.menus = Array.isArray(s.menus) ? s.menus : [];
+  s.menus.forEach(menu=>{
+    menu.eventId = menu.eventId || '';
+    menu.sections = Array.isArray(menu.sections) ? menu.sections : [];
+    menu.sections.forEach(sec=>{ sec.id = sec.id || uid(); sec.name = sec.name || 'Menu'; sec.items = Array.isArray(sec.items) ? sec.items : []; sec.items.forEach(item=>{ item.id = item.id || uid(); item.name = item.name || ''; item.notes = item.notes || ''; }); });
   });
   s.settings.events.forEach(ev=>{
     if(!ev.ownerId) ev.ownerId = ownerUidParam;
@@ -377,7 +384,7 @@ function renderDashboard(){
   renderBudgetBox();
 
   const myGuests = visibleGuests();
-  const totalPeople = myGuests.reduce((s,g)=>s+(Number(g.adults)||0)+(Number(g.children)||0)+(g.family||[]).length,0);
+  const totalPeople = myGuests.reduce((s,g)=>s + peopleBreakdown(g).reduce((x,p)=>x+p.count,0),0);
   const peopleCounts = { confirmed:0, pending:0, declined:0 };
   myGuests.forEach(g=> peopleBreakdown(g).forEach(p=> peopleCounts[p.status] += p.count));
   document.getElementById('statGuestTotal').textContent = totalPeople;
@@ -431,14 +438,8 @@ function renderEventsBox(){
   const pinIcon = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 21s-6-5.5-6-10a6 6 0 0112 0c0 4.5-6 10-6 10z"/><circle cx="12" cy="11" r="2.2"/></svg>`;
   box.innerHTML = events.map(ev=>{
     const myGuests = visibleGuests();
-    const attendees = myGuests.filter(g=>(g.events||[]).includes(ev.id));
-    const mainCount = attendees.reduce((s,g)=>s+(Number(g.adults)||0)+(Number(g.children)||0),0);
-    const familyCount = myGuests.reduce((s,g)=> s + (g.family||[]).filter(m=>(m.events||[]).includes(ev.id)).length, 0);
-    const count = mainCount + familyCount;
-    const bashorCount = ev.isMainWedding ? (
-      myGuests.filter(g=>g.bashorRaat && (g.events||[]).includes(ev.id)).length +
-      myGuests.reduce((s,g)=> s + (g.family||[]).filter(m=>m.bashorRaat && (m.events||[]).includes(ev.id)).length, 0)
-    ) : 0;
+    const count = eventHeadcount(ev.id);
+    const bashorCount = ev.isMainWedding ? eventHeadcount(ev.id, true) : 0;
     return `<div class="event-card">
       <div class="event-top">
         <div class="event-name">${escapeHtml(ev.name)}${ev.sharedWith && ev.sharedWith.length ? ` <span class="event-shared">Shared</span>`:''}</div>
@@ -460,38 +461,47 @@ function attendeesForEvent(eventId, bashorOnly){
   const rows = [];
   visibleGuests().forEach(g=>{
     if((g.events||[]).includes(eventId) && (!bashorOnly || g.bashorRaat)){
-      rows.push({ name: g.name, count: (Number(g.adults)||0)+(Number(g.children)||0)||1, status: (g.eventStatus||{})[eventId]||'pending' });
+      rows.push({ guestId:g.id, personId:g.id, isMain:true, name:g.name, count:mainGuestHeadcount(g), tag:g.tag||'', phone:g.phone||'', notes:g.notes||'', status:(g.eventStatus||{})[eventId]||'pending', familyOf:'' });
     }
     (g.family||[]).forEach(m=>{
       if((m.events||[]).includes(eventId) && (!bashorOnly || m.bashorRaat)){
-        rows.push({ name: m.name, count: 1, status: (m.eventStatus||{})[eventId]||'pending' });
+        rows.push({ guestId:g.id, personId:m.id, isMain:false, name:m.name, count:1, tag:g.tag||'', phone:'', notes:'', status:(m.eventStatus||{})[eventId]||'pending', familyOf:g.name });
       }
     });
   });
-  return rows;
+  const byTag = new Map();
+  rows.forEach(r=>{ const tag=r.tag||'No Description Tag'; if(!byTag.has(tag)) byTag.set(tag,[]); byTag.get(tag).push(r); });
+  const ordered=[];
+  [...byTag.entries()].sort((a,b)=>a[0].localeCompare(b[0])).forEach(([,items])=>{
+    const mains=items.filter(r=>r.isMain).sort((a,b)=>a.name.localeCompare(b.name));
+    mains.forEach(main=>{ ordered.push(main); items.filter(r=>!r.isMain && r.guestId===main.guestId).forEach(m=>ordered.push(m)); });
+  });
+  return ordered;
 }
 function openEventAttendeesPopup(eventId, bashorOnly){
   const ev = eventById(eventId);
   if(!ev) return;
   const rows = attendeesForEvent(eventId, bashorOnly);
   const total = rows.reduce((s,r)=>s+r.count,0);
+  const groups = new Map();
+  rows.forEach(r=>{ const key=r.tag || 'No Description Tag'; if(!groups.has(key)) groups.set(key,[]); groups.get(key).push(r); });
+  const htmlGroups = Array.from(groups.entries()).map(([tag,items])=>`
+    <div class="section-title" style="margin-top:14px;">${escapeHtml(tag)} <span style="font-weight:400;">— ${items.reduce((s,r)=>s+r.count,0)}</span></div>
+    <div class="list">${items.map(r=>`<div class="item" style="padding:12px 14px;">
+      <div class="item-top"><div><div class="item-title">${escapeHtml(r.name)}${r.isMain&&r.count>1?` <span class="tag-badge">${r.count} people</span>`:''}</div>
+      ${r.tag?`<div class="item-meta">${escapeHtml(r.tag)}</div>`:''}
+      ${!r.isMain?`<div class="item-meta">family member of ${escapeHtml(r.familyOf)}</div>`:''}
+      </div><span class="badge ${r.status}">${escapeHtml(r.status)}</span></div>
+      ${r.isMain && r.notes?`<div class="item-meta">${escapeHtml(r.notes)}</div>`:''}
+    </div>`).join('')}</div>`).join('');
   openSheet(`
-    <h3 class="serif">${escapeHtml(ev.name)}${bashorOnly?' — Bashor Raat':''}</h3>
-    <p class="sheet-sub">${total} guest${total===1?'':'s'} ${bashorOnly?'staying over':'expected'}</p>
-    <div class="list">
-      ${rows.length ? rows.map(r=>`
-        <div class="item" style="cursor:default;">
-          <div class="item-top">
-            <div><div class="item-title">${escapeHtml(r.name)}</div>${r.count>1?`<div class="item-meta">${r.count} people</div>`:''}</div>
-            <span class="badge ${r.status}">${r.status[0].toUpperCase()+r.status.slice(1)}</span>
-          </div>
-        </div>`).join('')
-      : emptyState('No one yet', bashorOnly ? 'No guests marked for Bashor Raat.' : 'No guests invited to this event yet.')}
-    </div>
-    <div class="sheet-actions"><button class="btn btn-primary" id="closePopupBtn" style="width:100%;">Close</button></div>
-  `);
-  document.getElementById('closePopupBtn').onclick = closeSheet;
+    <h3 class="serif">${escapeHtml(ev.name)} guests</h3>
+    <p class="sheet-sub">${total} guest${total===1?'':'s'} ${bashorOnly?'staying over':'expected'} · ${rows.length} guest entr${rows.length===1?'y':'ies'}</p>
+    ${rows.length ? htmlGroups : emptyState('No one yet', bashorOnly ? 'No guests marked for Bashor Raat.' : 'No guests invited to this event yet.')}
+    <div class="sheet-actions"><button class="btn btn-ghost" id="closeAttendeesBtn">Close</button></div>`);
+  document.getElementById('closeAttendeesBtn').onclick=closeSheet;
 }
+
 
 function renderBudgetBox(){
   const box = document.getElementById('budgetBox');
@@ -1085,6 +1095,8 @@ function openExpenseForm(expense){
 /* ================= GUESTS (shared; per-event invite + RSVP) ================= */
 let guestFilter='all';
 let guestEventFilter = []; // event IDs to filter the guest list by; empty = show all
+let guestTagFilter = '';
+let guestSearch = '';
 document.querySelectorAll('#guestFilter .seg-btn').forEach(b=>{
   b.addEventListener('click', ()=>{
     guestFilter = b.dataset.f;
@@ -1093,7 +1105,6 @@ document.querySelectorAll('#guestFilter .seg-btn').forEach(b=>{
     renderGuests();
   });
 });
-document.getElementById('filterByEventBtn').addEventListener('click', openEventFilterSheet);
 function updateEventFilterBadge(){
   const badge = document.getElementById('eventFilterBadge');
   if(guestEventFilter.length){ badge.textContent = guestEventFilter.length; badge.style.display='inline-flex'; }
@@ -1122,6 +1133,18 @@ function openEventFilterSheet(){
   document.getElementById('clearFilterBtn').onclick = ()=>{ guestEventFilter = []; updateEventFilterBadge(); closeSheet(); renderGuests(); };
   document.getElementById('applyFilterBtn').onclick = ()=>{ guestEventFilter = Array.from(selected); updateEventFilterBadge(); closeSheet(); renderGuests(); };
 }
+function exportFilteredGuestsXLS(){
+  const q=guestSearch.trim().toLowerCase();
+  const rows=[];
+  visibleGuests().sort((a,b)=>a.name.localeCompare(b.name)).forEach(g=>{
+    const hay=[g.name,g.phone,g.tag,g.notes,...(g.family||[]).map(m=>m.name)].join(' ').toLowerCase();
+    if(q&&!hay.includes(q))return; if(guestTagFilter&&(g.tag||'')!==guestTagFilter)return;
+    let persons=personRowsForGuest(g); if(guestFilter!=='all')persons=persons.filter(p=>p.status===guestFilter); if(guestEventFilter.length)persons=persons.filter(p=>p.events.some(id=>guestEventFilter.includes(id))); if(!persons.length)return;
+    persons.forEach(p=>rows.push({Name:p.name,'Family Member Of':p.isMain?'':g.name,'Description Tag':g.tag||'',Phone:p.isMain?(g.phone||''):'',Adults:p.isMain?(Number(g.adults)||0):0,Children:p.isMain?(Number(g.children)||0):0,Events:p.events.map(id=>eventById(id)?.name||'').filter(Boolean).join(', '),Status:p.status,Notes:p.isMain?(g.notes||''):''}));
+  });
+  if(!rows.length){toast('No guests match the current filters');return;}
+  const wb=XLSX.utils.book_new(),ws=XLSX.utils.json_to_sheet(rows); XLSX.utils.book_append_sheet(wb,ws,'Filtered Guests'); XLSX.writeFile(wb,`guest-list-${todayISO()}.xlsx`); toast(`${rows.length} guest rows exported`);
+}
 document.getElementById('importGuestsBtn').addEventListener('click', openImportPicker);
 
 function eventById(id){ return (state.settings.events||[]).find(e=>e.id===id); }
@@ -1136,13 +1159,31 @@ function overallGuestStatus(g){ return overallStatus(g.eventStatus); }
 /* Every individual person this guest entry represents: the main guest counts as
    (adults+children) people at the guest's own overall status, and each named family
    member counts as 1 person at their own independent status. */
-function peopleBreakdown(g){
+function mainGuestHeadcount(g){
+  const n = (Number(g.adults)||0) + (Number(g.children)||0);
+  return n > 0 ? n : 1;
+}
+function peopleBreakdown(g, eventId=null){
   const people = [];
-  const mainCount = (Number(g.adults)||0) + (Number(g.children)||0);
-  if(mainCount>0) people.push({ count: mainCount, status: overallGuestStatus(g) });
-  (g.family||[]).forEach(m=> people.push({ count: 1, status: overallStatus(m.eventStatus) }));
+  if(eventId===null || (g.events||[]).includes(eventId)){
+    people.push({ count: mainGuestHeadcount(g), status: eventId===null ? overallGuestStatus(g) : ((g.eventStatus||{})[eventId]||'pending'), isMain:true, guest:g });
+  }
+  (g.family||[]).forEach(m=>{
+    if(eventId===null || (m.events||[]).includes(eventId)){
+      people.push({ count:1, status:eventId===null ? overallStatus(m.eventStatus) : ((m.eventStatus||{})[eventId]||'pending'), isMain:false, guest:g, member:m });
+    }
+  });
   return people;
 }
+function eventHeadcount(eventId, bashorOnly=false){
+  return visibleGuests().reduce((sum,g)=>{
+    let n=0;
+    if((g.events||[]).includes(eventId) && (!bashorOnly || g.bashorRaat)) n += mainGuestHeadcount(g);
+    (g.family||[]).forEach(m=>{ if((m.events||[]).includes(eventId) && (!bashorOnly || m.bashorRaat)) n += 1; });
+    return sum+n;
+  },0);
+}
+
 function normalizeHeader(h){ return String(h||'').toLowerCase().replace(/[^a-z0-9]/g,''); }
 function findColumn(headers, synonyms){ const normSyns = synonyms.map(normalizeHeader); return headers.find(h => normSyns.includes(normalizeHeader(h))); }
 
@@ -1286,62 +1327,44 @@ function personRowsForGuest(g){
 }
 function renderGuests(){
   const list = document.getElementById('guestList');
+  const q = guestSearch.trim().toLowerCase();
   const households = [...visibleGuests()].sort((a,b)=>a.name.localeCompare(b.name));
   list.innerHTML='';
   const cycle = { pending:'confirmed', confirmed:'declined', declined:'pending' };
-  let anyRendered = false;
-
+  let anyRendered=false;
   households.forEach(g=>{
-    let persons = personRowsForGuest(g);
-    if(guestFilter!=='all') persons = persons.filter(p=>p.status===guestFilter);
-    if(guestEventFilter.length) persons = persons.filter(p=>p.events.some(id=>guestEventFilter.includes(id)));
+    const haystack=[g.name,g.phone,g.tag,g.notes,...(g.family||[]).map(m=>m.name)].join(' ').toLowerCase();
+    if(q && !haystack.includes(q)) return;
+    if(guestTagFilter && (g.tag||'')!==guestTagFilter) return;
+    let persons=personRowsForGuest(g);
+    if(guestFilter!=='all') persons=persons.filter(p=>p.status===guestFilter);
+    if(guestEventFilter.length) persons=persons.filter(p=>p.events.some(id=>guestEventFilter.includes(id)));
     if(persons.length===0) return;
-    anyRendered = true;
-
-    const group = document.createElement('div');
-    group.className = 'guest-group';
+    anyRendered=true;
+    const group=document.createElement('div'); group.className='guest-group';
     persons.forEach(p=>{
-      const dots = p.events.map(id=>{
-        const ev = eventById(id);
-        if(!ev) return '';
-        const st = p.eventStatus[id] || 'pending';
-        return `<span class="event-dot ${st}" data-cycle-guest="${p.guestId}" data-cycle-person="${p.personId}" data-cycle-eventid="${id}" title="${escapeAttr(ev.name)}"><span class="dot"></span>${escapeHtml(ev.name)}</span>`;
-      }).join('');
-      const row = document.createElement('div');
-      row.className = 'guest-person-row';
-      row.innerHTML = `
-        <div class="item-top">
-          <div>
-            <div class="item-title">${escapeHtml(p.name)}${p.bashorRaat?' 🌙':''}${p.tag ? ` <span class="tag-badge">${escapeHtml(p.tag)}</span>` : ''}${p.isMain && g.sharedWith && g.sharedWith.length ? ` <span class="badge" style="background:var(--teal-soft);color:var(--teal-2);">Shared</span>` : ''}</div>
-            <div class="item-meta">${p.count>1?p.count+' people':''}${!p.isMain?(p.count>1?' · ':'')+'family member of '+escapeHtml(g.name):''}</div>
-          </div>
-        </div>
-        <div class="event-dots">${dots}</div>`;
-      row.addEventListener('click', (e)=>{
-        if(e.target.closest('[data-cycle-guest]')) return;
-        openGuestForm(g, p.isMain ? null : p.personId);
-      });
-      row.querySelectorAll('[data-cycle-guest]').forEach(dot=>{
-        dot.addEventListener('click', (e)=>{
-          e.stopPropagation();
-          const guest = state.guests.find(x=>x.id===dot.dataset.cycleGuest);
-          const evId = dot.dataset.cycleEventid;
-          if(dot.dataset.cyclePerson === guest.id){
-            guest.eventStatus[evId] = cycle[guest.eventStatus[evId]] || 'pending';
-          } else {
-            const m = guest.family.find(x=>x.id===dot.dataset.cyclePerson);
-            m.eventStatus[evId] = cycle[m.eventStatus[evId]] || 'pending';
-          }
-          saveData(); renderAll();
-        });
-      });
+      const dots=p.events.map(id=>{const ev=eventById(id); if(!ev)return ''; const st=p.eventStatus[id]||'pending'; return `<span class="event-dot ${st}" data-cycle-guest="${p.guestId}" data-cycle-person="${p.personId}" data-cycle-eventid="${id}" title="${escapeAttr(ev.name)}"><span class="dot"></span>${escapeHtml(ev.name)}</span>`;}).join('');
+      const row=document.createElement('div'); row.className='guest-person-row';
+      row.innerHTML=`<div class="item-top"><div><div class="item-title">${escapeHtml(p.name)}${p.bashorRaat?' 🌙':''}${p.tag?` <span class="tag-badge">${escapeHtml(p.tag)}</span>`:''}${p.isMain&&g.sharedWith&&g.sharedWith.length?` <span class="badge" style="background:var(--teal-soft);color:var(--teal-2);">Shared</span>`:''}</div><div class="item-meta">${p.count>1?p.count+' people':''}${!p.isMain?(p.count>1?' · ':'')+'family member of '+escapeHtml(g.name):''}</div></div></div><div class="event-dots">${dots}</div>`;
+      row.addEventListener('click',e=>{if(e.target.closest('[data-cycle-guest]'))return;openGuestForm(g,p.isMain?null:p.personId);});
+      row.querySelectorAll('[data-cycle-guest]').forEach(dot=>dot.addEventListener('click',e=>{e.stopPropagation();const guest=state.guests.find(x=>x.id===dot.dataset.cycleGuest);const evId=dot.dataset.cycleEventid;if(!guest)return;if(dot.dataset.cyclePerson===guest.id)guest.eventStatus[evId]=cycle[guest.eventStatus[evId]]||'pending';else{const m=guest.family.find(x=>x.id===dot.dataset.cyclePerson);if(m)m.eventStatus[evId]=cycle[m.eventStatus[evId]]||'pending';}saveData();renderAll();}));
       group.appendChild(row);
-    });
-    list.appendChild(group);
+    }); list.appendChild(group);
   });
-
-  if(!anyRendered){ list.innerHTML = emptyState('No guests here','Tap + to add a guest, or clear your filters.'); }
+  if(!anyRendered) list.innerHTML=emptyState('No guests here','Tap + to add a guest, or clear your filters.');
 }
+function guestTagOptions(){ return [...new Set(visibleGuests().map(g=>(g.tag||'').trim()).filter(Boolean))].sort((a,b)=>a.localeCompare(b)); }
+function openGuestAdvancedFilterSheet(){
+  const tags=guestTagOptions(); const selectedTag=guestTagFilter;
+  openSheet(`<h3 class="serif">Guest filters</h3><p class="sheet-sub">Combine status, event and Description Tag filters.</p><div class="field"><label>Description Tag</label><select id="guestTagSelect"><option value="">All tags</option>${tags.map(t=>`<option value="${escapeAttr(t)}" ${t===selectedTag?'selected':''}>${escapeHtml(t)}</option>`).join('')}</select></div><div class="sheet-actions"><button class="btn btn-ghost" id="clearGuestFiltersBtn">Clear all</button><button class="btn btn-primary" id="applyGuestFiltersBtn">Apply</button></div>`);
+  document.getElementById('clearGuestFiltersBtn').onclick=()=>{guestTagFilter='';guestEventFilter=[];guestFilter='all';document.querySelectorAll('#guestFilter .seg-btn').forEach(b=>b.classList.toggle('active',b.dataset.f==='all'));updateEventFilterBadge();closeSheet();renderGuests();};
+  document.getElementById('applyGuestFiltersBtn').onclick=()=>{guestTagFilter=document.getElementById('guestTagSelect').value;closeSheet();renderGuests();};
+}
+document.getElementById('filterByEventBtn').addEventListener('click', openEventFilterSheet);
+document.getElementById('guestAdvancedFilterBtn').addEventListener('click', openGuestAdvancedFilterSheet);
+document.getElementById('exportGuestsBtn').addEventListener('click', exportFilteredGuestsXLS);
+document.getElementById('guestSearchInput').addEventListener('input', e=>{ guestSearch=e.target.value; renderGuests(); });
+
 function openGuestForm(guest, expandFamilyId){
   const isEdit = !!guest;
   guest = guest || { id: uid(), name:'', phone:'', events:[], eventStatus:{}, adults:1, children:0, notes:'', bashorRaat:false, tag:'', family:[], ownerId: myUid(), sharedWith:[] };
@@ -1435,7 +1458,7 @@ function openGuestForm(guest, expandFamilyId){
       <div class="field"><label>Name</label><input id="g_name" value="${escapeAttr(guest.name)}" placeholder="e.g. Debashish Roy"></div>
       <div class="field-row">
         <div class="field"><label>Phone</label><input id="g_phone" value="${escapeAttr(guest.phone)}"></div>
-        <div class="field"><label>Invited by <span style="font-weight:400;color:var(--text-soft);">(optional)</span></label><input id="g_tag" value="${escapeAttr(guest.tag)}" placeholder="e.g. Dad, College friends"></div>
+        <div class="field"><label>Description Tag <span style="font-weight:400;color:var(--text-soft);">(optional)</span></label><input id="g_tag" value="${escapeAttr(guest.tag)}" placeholder="e.g. Dad, College friends, Office"></div>
       </div>
       <div class="field-row">
         <div class="field"><label>Adults</label><input type="number" min="0" id="g_adults" value="${guest.adults||0}"></div>
@@ -1571,6 +1594,35 @@ function openGuestForm(guest, expandFamilyId){
   draw();
 }
 
+/* ================= MENU ================= */
+function menuForEvent(eventId){
+  let m=(state.menus||[]).find(x=>x.eventId===eventId);
+  if(!m){ m={id:uid(),eventId,sections:[],ownerId:myUid()}; state.menus.push(m); }
+  return m;
+}
+function renderMenu(){
+  const list=document.getElementById('menuList'); if(!list)return;
+  const events=visibleEvents();
+  if(!events.length){list.innerHTML=emptyState('No events yet','Add an event in Settings first.');return;}
+  list.innerHTML=events.map(ev=>{const m=(state.menus||[]).find(x=>x.eventId===ev.id);const sections=m?.sections||[];const itemCount=sections.reduce((n,s)=>n+s.items.length,0);return `<div class="item" data-menu-event="${ev.id}"><div class="item-top"><div><div class="item-title">${escapeHtml(ev.name)}</div><div class="item-meta">${itemCount} item${itemCount===1?'':'s'} · ${sections.length} section${sections.length===1?'':'s'}</div></div><span class="badge ${itemCount?'confirmed':'pending'}">${itemCount?'Menu added':'Not set'}</span></div>${sections.slice(0,3).map(sec=>`<div class="item-meta"><strong>${escapeHtml(sec.name)}</strong>: ${escapeHtml(sec.items.map(i=>i.name).join(', '))}</div>`).join('')}${sections.length>3?`<div class="item-meta">+${sections.length-3} more sections</div>`:''}</div>`;}).join('');
+  list.querySelectorAll('[data-menu-event]').forEach(el=>el.addEventListener('click',()=>openMenuEditor(el.dataset.menuEvent)));
+}
+function openMenuEditor(eventId){
+  const ev=eventById(eventId); if(!ev)return; const menu=menuForEvent(eventId);
+  function draw(){
+    openSheet(`<h3 class="serif">${escapeHtml(ev.name)} menu</h3><p class="sheet-sub">Create a separate menu for this event. Add sections such as Starters, Main Course, Desserts, Beverages, etc.</p><div id="menuSections">${menu.sections.length?menu.sections.map(sec=>`<div class="item" style="margin-bottom:9px;"><div class="item-top"><input data-section-name="${sec.id}" value="${escapeAttr(sec.name)}" placeholder="Section name" style="flex:1;padding:9px 10px;border:1.5px solid var(--line);border-radius:10px;font-size:14px;font-weight:700;background:#FCFAFA;color:var(--ink);"><button class="btn btn-danger btn-sm" data-remove-section="${sec.id}">Remove</button></div><div style="margin-top:8px;">${sec.items.map(item=>`<div style="display:flex;gap:6px;align-items:center;margin:6px 0;"><input data-item-name="${sec.id}|${item.id}" value="${escapeAttr(item.name)}" placeholder="Dish / item" style="flex:1;padding:9px 10px;border:1.5px solid var(--line);border-radius:10px;font-size:13px;"><button class="btn btn-danger btn-sm" data-remove-item="${sec.id}|${item.id}">×</button></div>`).join('')}</div><button class="btn btn-ghost btn-sm" data-add-item="${sec.id}" style="margin-top:4px;">+ Add item</button></div>`).join(''):'<p class="item-meta">No menu sections yet.</p>'}</div><button class="btn btn-ghost" id="addMenuSectionBtn" style="width:100%;margin-top:6px;">+ Add menu section</button><div class="sheet-actions"><button class="btn btn-ghost" id="cancelMenuBtn">Cancel</button><button class="btn btn-primary" id="saveMenuBtn">Save menu</button></div>`);
+    sheetContent.querySelectorAll('[data-remove-section]').forEach(b=>b.onclick=()=>{menu.sections=menu.sections.filter(s=>s.id!==b.dataset.removeSection);draw();});
+    sheetContent.querySelectorAll('[data-add-item]').forEach(b=>b.onclick=()=>{const sec=menu.sections.find(s=>s.id===b.dataset.addItem);if(sec){sec.items.push({id:uid(),name:'',notes:''});draw();}});
+    sheetContent.querySelectorAll('[data-remove-item]').forEach(b=>b.onclick=()=>{const [sid,iid]=b.dataset.removeItem.split('|');const sec=menu.sections.find(s=>s.id===sid);if(sec)sec.items=sec.items.filter(i=>i.id!==iid);draw();});
+    document.getElementById('addMenuSectionBtn').onclick=()=>{menu.sections.push({id:uid(),name:'New section',items:[]});draw();};
+    sheetContent.querySelectorAll('[data-section-name]').forEach(input=>input.addEventListener('input',()=>{const sec=menu.sections.find(s=>s.id===input.dataset.sectionName);if(sec)sec.name=input.value;}));
+    sheetContent.querySelectorAll('[data-item-name]').forEach(input=>input.addEventListener('input',()=>{const [sid,iid]=input.dataset.itemName.split('|');const sec=menu.sections.find(s=>s.id===sid);const item=sec?.items.find(i=>i.id===iid);if(item)item.name=input.value;}));
+    document.getElementById('cancelMenuBtn').onclick=closeSheet;
+    document.getElementById('saveMenuBtn').onclick=()=>{menu.sections=menu.sections.filter(sec=>sec.name.trim()||sec.items.some(i=>i.name.trim()));menu.sections.forEach(sec=>{sec.name=sec.name.trim()||'Menu';sec.items=sec.items.filter(i=>i.name.trim());});saveData();closeSheet();renderAll();toast('Menu saved');};
+  }
+  draw();
+}
+
 /* ================= SETTINGS ================= */
 document.getElementById('saveSettingsBtn').addEventListener('click', ()=>{
   state.settings.weddingDate = document.getElementById('settingWeddingDate').value || state.settings.weddingDate;
@@ -1689,6 +1741,7 @@ function renderAll(){
   renderVendors();
   renderFinance();
   renderGuests();
+  renderMenu();
   renderEventsSettingsList();
   renderPeopleList();
   renderStorage();

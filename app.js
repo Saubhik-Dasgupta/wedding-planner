@@ -286,7 +286,6 @@ function switchView(view){
   document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
   document.getElementById('view-'+view).classList.add('active');
   document.querySelectorAll('.nav-btn').forEach(b=>b.classList.toggle('active', b.dataset.view===view));
-  document.getElementById('fabAdd').style.display = (view==='settings' || view==='finance' || view==='dashboard') ? 'none' : 'flex';
   renderAll();
 }
 document.querySelectorAll('.dash-tab').forEach(btn=>{

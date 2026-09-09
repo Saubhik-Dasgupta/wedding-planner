@@ -276,10 +276,11 @@ function visibleVendors(){ const me = myUid(); return state.vendors.filter(v=> c
 function visibleExpenses(){ const me = myUid(); return state.otherExpenses.filter(e=> canSee(e, me)); }
 function visibleEvents(){ const me = myUid(); return (state.settings.events||[]).filter(e=> canSee(e, me)); }
 function visibleGuests(){
-  // Guests use the same owner + explicit sharing model as other private records.
-  // Show everything owned by me, plus anything explicitly shared with me.
+  // Guests are visible when owned by the signed-in user or explicitly shared with them.
+  // Defensive Array.isArray keeps older/partially migrated records from breaking the view.
   const me = myUid();
-  return state.guests.filter(g=>canSee(g, me));
+  const guests = Array.isArray(state.guests) ? state.guests : [];
+  return guests.filter(g=>g && canSee(g, me));
 }
 function allPaymentsFlat(){
   const rows = [];
@@ -474,7 +475,7 @@ function attendeesForEvent(eventId, bashorOnly){
     if((g.events||[]).includes(eventId) && (!bashorOnly || g.bashorRaat)){
       rows.push({ guestId:g.id, personId:g.id, isMain:true, name:g.name, count:mainGuestHeadcount(g), tag:g.tag||'', phone:g.phone||'', notes:g.notes||'', status:(g.eventStatus||{})[eventId]||'pending', familyOf:'' });
     }
-    (g.family||[]).forEach(m=>{
+    (Array.isArray(g.family)?g.family:[]).forEach(m=>{
       if((m.events||[]).includes(eventId) && (!bashorOnly || m.bashorRaat)){
         rows.push({ guestId:g.id, personId:m.id, isMain:false, name:m.name, count:1, tag:g.tag||'', phone:'', notes:'', status:(m.eventStatus||{})[eventId]||'pending', familyOf:g.name });
       }
@@ -1743,18 +1744,28 @@ function renderPeopleList(){
 }
 
 /* ---------------- Master render ---------------- */
+function safeRender(name, fn){
+  try{ fn(); }
+  catch(err){
+    console.error(`[Wedding Secretary] ${name} render failed`, err);
+  }
+}
 function renderAll(){
-  renderDashboard();
-  renderTasks();
-  renderVendors();
-  renderFinance();
-  renderGuests();
-  renderMenu();
-  renderEventsSettingsList();
-  renderPeopleList();
-  renderStorage();
-  document.getElementById('settingWeddingDate').value = state.settings.weddingDate;
-  document.getElementById('settingReceptionDate').value = state.settings.receptionDate;
+  // Keep every tab independently renderable. A malformed legacy record in one module
+  // must never prevent Guests, Menu, Settings, etc. from painting.
+  safeRender('dashboard', renderDashboard);
+  safeRender('tasks', renderTasks);
+  safeRender('vendors', renderVendors);
+  safeRender('finance', renderFinance);
+  safeRender('guests', renderGuests);
+  safeRender('menu', renderMenu);
+  safeRender('events settings', renderEventsSettingsList);
+  safeRender('people', renderPeopleList);
+  safeRender('storage', renderStorage);
+  const weddingDate = document.getElementById('settingWeddingDate');
+  const receptionDate = document.getElementById('settingReceptionDate');
+  if(weddingDate) weddingDate.value = state.settings.weddingDate || '';
+  if(receptionDate) receptionDate.value = state.settings.receptionDate || '';
 }
 renderAll();
 setTimeout(hideSplash, 2500); // safety net in case auth check is ever unusually slow

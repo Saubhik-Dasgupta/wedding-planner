@@ -815,6 +815,125 @@ body:not(.authenticated) .bottom-nav,body:not(.authenticated) .desktop-shell{dis
   #dash-overview > .section-title{margin-top:24px!important;}
   #dash-overview > .stat-grid{margin-top:14px!important;}
 }
+
+/* ================================================================
+   V7 — CLEAN SHELL + DASHBOARD + GUEST LIST REPAIR
+   These rules intentionally override earlier experimental layout rules.
+   ================================================================ */
+@media (min-width:900px){
+  .desktop-shell{
+    display:flex!important;
+    flex-direction:column!important;
+    width:220px!important;
+    min-width:220px!important;
+    max-width:220px!important;
+    height:auto!important;
+    box-sizing:border-box!important;
+    left:18px!important;right:auto!important;top:18px!important;bottom:18px!important;
+    padding:20px 12px!important;
+    overflow:hidden!important;
+  }
+  .desktop-shell .brand-lockup{width:100%!important;box-sizing:border-box!important;}
+  .desktop-shell .side-label{width:100%!important;box-sizing:border-box!important;padding:17px 10px 7px!important;}
+  .desktop-shell .nav-btn{
+    display:flex!important;
+    width:100%!important;
+    height:42px!important;
+    min-height:42px!important;
+    max-height:42px!important;
+    flex:0 0 42px!important;
+    box-sizing:border-box!important;
+    flex-direction:row!important;
+    align-items:center!important;
+    justify-content:flex-start!important;
+    gap:10px!important;
+    margin:2px 0!important;
+    padding:8px 11px!important;
+    font-size:12px!important;
+    line-height:1!important;
+    white-space:nowrap!important;
+  }
+  .desktop-shell .nav-icon{width:18px!important;height:18px!important;flex:0 0 18px!important;}
+  .desktop-shell .side-wedding-note{position:static!important;left:auto!important;right:auto!important;bottom:auto!important;width:100%!important;box-sizing:border-box!important;margin-top:auto!important;}
+
+  .topbar{left:258px!important;right:22px!important;top:18px!important;width:auto!important;max-width:none!important;margin:0!important;}
+  body.authenticated.dashboard-view .hero{margin:96px 22px 0 258px!important;}
+  .container{margin:0 22px 0 258px!important;}
+  body.authenticated:not(.dashboard-view) .container{padding-top:104px!important;}
+  body.authenticated.dashboard-view .container{padding-top:22px!important;}
+
+  /* Dashboard overview: every heading gets its own grid cell. */
+  #dash-overview{
+    display:grid!important;
+    grid-template-columns:minmax(0,1.18fr) minmax(300px,.82fr)!important;
+    grid-template-areas:
+      "attention attention"
+      "alerts alerts"
+      "budgetTitle guestsTitle"
+      "budgetBox guestStats"
+      "tasksTitle tasksTitle"
+      "taskStats taskStats";
+    column-gap:22px!important;
+    row-gap:0!important;
+    align-items:start!important;
+  }
+  #dash-overview #attentionTitle{grid-area:attention!important;margin-top:6px!important;}
+  #dash-overview #alertsBox{grid-area:alerts!important;margin-top:0!important;}
+  #dash-overview #budgetTitle{grid-area:budgetTitle!important;margin-top:24px!important;}
+  #dash-overview #budgetBox{grid-area:budgetBox!important;margin-top:0!important;min-width:0!important;}
+  #dash-overview #guestsTitle{grid-area:guestsTitle!important;margin-top:24px!important;}
+  #dash-overview #guestStats{grid-area:guestStats!important;margin-top:0!important;min-width:0!important;}
+  #dash-overview #tasksTitle{grid-area:tasksTitle!important;margin-top:26px!important;}
+  #dash-overview #taskStats{grid-area:taskStats!important;margin-top:0!important;min-width:0!important;}
+  #dash-overview #guestStats,#dash-overview #taskStats{grid-template-columns:repeat(4,minmax(0,1fr))!important;}
+}
+@media (min-width:1400px){
+  .desktop-shell{width:220px!important;min-width:220px!important;max-width:220px!important;}
+  .topbar{left:258px!important;right:26px!important;}
+  body.authenticated.dashboard-view .hero{margin-left:258px!important;margin-right:26px!important;}
+  .container{margin-left:258px!important;margin-right:26px!important;}
+}
+@media (max-width:899px){
+  /* The desktop rail must never appear on phones/tablets. */
+  .desktop-shell,
+  body.authenticated .desktop-shell,
+  body:not(.authenticated) .desktop-shell{
+    display:none!important;
+    visibility:hidden!important;
+    opacity:0!important;
+    pointer-events:none!important;
+  }
+  .topbar{display:none!important;}
+  body.authenticated .bottom-nav{display:grid!important;}
+  #dash-overview{display:block!important;}
+  #dash-overview > .section-title,
+  #dash-overview > #attentionTitle,
+  #dash-overview > #budgetTitle,
+  #dash-overview > #guestsTitle,
+  #dash-overview > #tasksTitle{margin-top:24px!important;}
+  #dash-overview > #alertsBox,
+  #dash-overview > #budgetBox,
+  #dash-overview > #guestStats,
+  #dash-overview > #taskStats{margin-top:0!important;}
+}
+
+
+/* V8 stability overrides */
+@media (min-width:900px){
+  .desktop-shell .nav-btn,
+  .desktop-shell .nav-btn:link,
+  .desktop-shell .nav-btn:visited{
+    position:relative!important;
+    display:flex!important;
+    visibility:visible!important;
+    opacity:1!important;
+    overflow:visible!important;
+  }
+  .desktop-shell .nav-btn + .nav-btn{margin-top:2px!important;}
+}
+#view-guests .list#guestList{display:block!important;visibility:visible!important;opacity:1!important;min-height:24px;}
+#view-guests.active .list#guestList{display:block!important;}
+
 </style>
 </head>
 <body>
@@ -914,7 +1033,7 @@ body:not(.authenticated) .bottom-nav,body:not(.authenticated) .desktop-shell{dis
       <div id="budgetBox"></div>
 
       <div class="section-title" id="guestsTitle">Guests</div>
-      <div class="stat-grid">
+      <div class="stat-grid" id="guestStats">
         <div class="stat-card"><div class="label">Total</div><div class="value" id="statGuestTotal">0</div><div class="sub" id="statGuestPeople"></div></div>
         <div class="stat-card"><div class="label">Confirmed</div><div class="value" id="statGuestConfirmed">0</div></div>
         <div class="stat-card"><div class="label">Pending</div><div class="value" id="statGuestPending">0</div></div>
@@ -922,7 +1041,7 @@ body:not(.authenticated) .bottom-nav,body:not(.authenticated) .desktop-shell{dis
       </div>
 
       <div class="section-title" id="tasksTitle">Tasks</div>
-      <div class="stat-grid">
+      <div class="stat-grid" id="taskStats">
         <div class="stat-card"><div class="label">Open</div><div class="value" id="statTaskOpen">0</div></div>
         <div class="stat-card"><div class="label">Overdue</div><div class="value" id="statTaskOverdue">0</div></div>
         <div class="stat-card"><div class="label">Completed</div><div class="value" id="statTaskDone">0</div></div>

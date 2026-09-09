@@ -190,6 +190,8 @@ onAuthStateChanged(auth, async (user)=>{
   currentUser = user;
   hideSplash();
   if(user){
+    document.body.classList.add('authenticated');
+    document.body.classList.toggle('dashboard-view', currentView === 'dashboard');
     loginScreen.classList.add('hidden');
     document.getElementById('accountEmail').textContent = user.email;
     weddingDocRef = doc(db, ...WEDDING_DOC_PATH);
@@ -227,6 +229,7 @@ onAuthStateChanged(auth, async (user)=>{
       applyingRemoteUpdate = false;
     }, (err)=>{ console.error('Snapshot error', err); toast('Offline — showing last saved data'); });
   } else {
+    document.body.classList.remove('authenticated');
     if(unsubscribeSnapshot){ unsubscribeSnapshot(); unsubscribeSnapshot = null; }
     weddingDocRef = null;
     state = structuredClone(DEFAULT_DATA);
@@ -272,7 +275,12 @@ function canSee(entity, uid){
 function visibleVendors(){ const me = myUid(); return state.vendors.filter(v=> canSee(v, me)); }
 function visibleExpenses(){ const me = myUid(); return state.otherExpenses.filter(e=> canSee(e, me)); }
 function visibleEvents(){ const me = myUid(); return (state.settings.events||[]).filter(e=> canSee(e, me)); }
-function visibleGuests(){ const me = myUid(); return state.guests.filter(g=> canSee(g, me)); }
+function visibleGuests(){
+  // Guests use the same owner + explicit sharing model as other private records.
+  // Show everything owned by me, plus anything explicitly shared with me.
+  const me = myUid();
+  return state.guests.filter(g=>canSee(g, me));
+}
 function allPaymentsFlat(){
   const rows = [];
   state.vendors.forEach(v=> (v.payments||[]).forEach(p=> rows.push({ ...p, vendorId: v.id, vendorName: v.name, vendorVisible: canSee(v, myUid()) })));
@@ -283,6 +291,7 @@ function allPaymentsFlat(){
 document.querySelectorAll('.nav-btn').forEach(btn=>{ btn.addEventListener('click', ()=> switchView(btn.dataset.view)); });
 function switchView(view){
   currentView = view;
+  document.body.classList.toggle('dashboard-view', view === 'dashboard');
   document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
   document.getElementById('view-'+view).classList.add('active');
   document.querySelectorAll('.nav-btn').forEach(b=>b.classList.toggle('active', b.dataset.view===view));
@@ -306,6 +315,7 @@ function openSheet(html){
   clearTimeout(sheetCloseTimer);
   sheetContent.innerHTML = `<div class="sheet-handle"></div>` + html;
   backdrop.classList.add('active');
+  document.body.classList.add('sheet-open');
   if(!sheetHistoryPushed){
     try{ history.pushState({ wedsecSheet: true }, ''); }catch(e){}
     sheetHistoryPushed = true;
@@ -313,6 +323,7 @@ function openSheet(html){
 }
 function closeSheet(){
   backdrop.classList.remove('active');
+  document.body.classList.remove('sheet-open');
   // Deferred so a "close this sheet, immediately open a different one" chain (e.g. vendor -> record payment)
   // never actually leaves this history entry — the follow-up openSheet() cancels this timer first.
   if(sheetHistoryPushed){
@@ -330,6 +341,7 @@ window.addEventListener('popstate', ()=>{
   // history entry we pushed, so just hide the sheet — never navigate again from here.
   if(backdrop.classList.contains('active')){
     backdrop.classList.remove('active');
+    document.body.classList.remove('sheet-open');
     sheetHistoryPushed = false;
     clearTimeout(sheetCloseTimer);
   }
@@ -1366,13 +1378,11 @@ document.getElementById('guestSearchInput').addEventListener('input', e=>{ guest
 
 function openGuestForm(guest, expandFamilyId){
   const isEdit = !!guest;
-  guest = guest || { id: uid(), name:'', phone:'', events:[], eventStatus:{}, adults:1, children:0, notes:'', bashorRaat:false, tag:'', family:[], ownerId: myUid(), sharedWith:[] };
+  guest = guest || { id: uid(), ownerId: myUid(), sharedWith:[], name:'', phone:'', events:[], eventStatus:{}, adults:1, children:0, notes:'', bashorRaat:false, tag:'', family:[] };
   guest.events = guest.events || [];
   guest.eventStatus = guest.eventStatus || {};
   guest.family = guest.family || [];
   guest.tag = guest.tag || '';
-  guest.sharedWith = guest.sharedWith || [];
-  if(!guest.ownerId) guest.ownerId = myUid();
   const events = visibleEvents();
   let expandedFamilyId = expandFamilyId || null;
 
@@ -1453,7 +1463,6 @@ function openGuestForm(guest, expandFamilyId){
   function draw(){
     openSheet(`
       <h3 class="serif">${isEdit?'Edit guest':'New guest'}</h3>
-      ${isEdit && guest.ownerId && guest.ownerId!==myUid() ? `<p class="sheet-sub">Added by ${escapeHtml(nameFor(guest.ownerId))}, shared with you.</p>` : ''}
       <div class="field"><label>Name</label><input id="g_name" value="${escapeAttr(guest.name)}" placeholder="e.g. Debashish Roy"></div>
       <div class="field-row">
         <div class="field"><label>Phone</label><input id="g_phone" value="${escapeAttr(guest.phone)}"></div>

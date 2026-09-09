@@ -294,8 +294,40 @@ document.querySelectorAll('.dash-tab').forEach(btn=>{
 /* ---------------- Sheet ---------------- */
 const backdrop = document.getElementById('sheetBackdrop');
 const sheetContent = document.getElementById('sheetContent');
-function openSheet(html){ sheetContent.innerHTML = `<div class="sheet-handle"></div>` + html; backdrop.classList.add('active'); }
-function closeSheet(){ backdrop.classList.remove('active'); }
+let sheetHistoryPushed = false;
+let sheetCloseTimer = null;
+function openSheet(html){
+  clearTimeout(sheetCloseTimer);
+  sheetContent.innerHTML = `<div class="sheet-handle"></div>` + html;
+  backdrop.classList.add('active');
+  if(!sheetHistoryPushed){
+    try{ history.pushState({ wedsecSheet: true }, ''); }catch(e){}
+    sheetHistoryPushed = true;
+  }
+}
+function closeSheet(){
+  backdrop.classList.remove('active');
+  // Deferred so a "close this sheet, immediately open a different one" chain (e.g. vendor -> record payment)
+  // never actually leaves this history entry — the follow-up openSheet() cancels this timer first.
+  if(sheetHistoryPushed){
+    clearTimeout(sheetCloseTimer);
+    sheetCloseTimer = setTimeout(()=>{
+      if(sheetHistoryPushed && !backdrop.classList.contains('active')){
+        sheetHistoryPushed = false;
+        if(history.state && history.state.wedsecSheet) history.back();
+      }
+    }, 50);
+  }
+}
+window.addEventListener('popstate', ()=>{
+  // Android back button/gesture while a sheet is open: the browser has already consumed the
+  // history entry we pushed, so just hide the sheet — never navigate again from here.
+  if(backdrop.classList.contains('active')){
+    backdrop.classList.remove('active');
+    sheetHistoryPushed = false;
+    clearTimeout(sheetCloseTimer);
+  }
+});
 backdrop.addEventListener('click', e=>{ if(e.target===backdrop) closeSheet(); });
 
 document.getElementById('fabAdd').addEventListener('click', ()=>{

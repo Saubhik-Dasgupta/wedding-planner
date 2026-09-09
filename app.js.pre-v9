@@ -47,38 +47,8 @@ function loadLocalCache(){
     return deepMerge(structuredClone(DEFAULT_DATA), JSON.parse(raw));
   }catch(e){ return null; }
 }
-function cacheLocally(){
-  try{
-    // Keep the last known-good local state separately. This is a recovery safety net and is
-    // deliberately NOT cleared on sign-out. It can only be replaced by an explicit successful save.
-    localStorage.setItem(STORE_KEY, JSON.stringify(state));
-    if(hasUserData(state)) localStorage.setItem(STORE_KEY+'_recovery', JSON.stringify(state));
-  }catch(e){}
-}
-function loadRecoveryCache(){
-  try{
-    const raw = localStorage.getItem(STORE_KEY+'_recovery');
-    if(!raw) return null;
-    return deepMerge(structuredClone(DEFAULT_DATA), JSON.parse(raw));
-  }catch(e){ return null; }
-}
-function clearLocalCache(){
-  // Keep recovery data. Sign-out must never destroy the last local copy of wedding data.
-  try{ localStorage.removeItem(STORE_KEY); }catch(e){}
-}
-function hasUserData(s){
-  if(!s) return false;
-  return (Array.isArray(s.guests)&&s.guests.length>0) ||
-         (Array.isArray(s.vendors)&&s.vendors.length>0) ||
-         (Array.isArray(s.tasks)&&s.tasks.length>0) ||
-         (Array.isArray(s.otherExpenses)&&s.otherExpenses.length>0) ||
-         (Array.isArray(s.menus)&&s.menus.length>0) ||
-         ((s.settings?.events||[]).some(e=> e.venue || e.address || e.date !== DEFAULT_DATA.settings.events.find(x=>x.id===e.id)?.date));
-}
-function userDataCount(s){
-  if(!s) return 0;
-  return (s.guests?.length||0)+(s.vendors?.length||0)+(s.tasks?.length||0)+(s.otherExpenses?.length||0)+(s.menus?.length||0);
-}
+function cacheLocally(){ try{ localStorage.setItem(STORE_KEY, JSON.stringify(state)); }catch(e){} }
+function clearLocalCache(){ try{ localStorage.removeItem(STORE_KEY); }catch(e){} }
 function deepMerge(base, extra){
   const out = { ...base, ...extra };
   out.settings = { ...base.settings, ...(extra.settings||{}) };
@@ -93,8 +63,8 @@ function saveData(){
   showSyncStatus(true);
   clearTimeout(saveTimer);
   saveTimer = setTimeout(()=>{
-    setDoc(weddingDocRef, state, { merge: true })
-      .then(()=> { cacheLocally(); showSyncStatus(false); })
+    setDoc(weddingDocRef, state)
+      .then(()=> showSyncStatus(false))
       .catch(err=>{
         console.error('Sync failed', err);
         showSyncStatus(false);
@@ -113,12 +83,14 @@ function normalizeState(s, ownerUidParam){
   const looksLikeUid = (x) => typeof x === 'string' && x.length >= 20; // real Firebase UIDs are long; old data used short names
 
   (s.vendors||[]).forEach(v=>{
+    if(!v.ownerId) v.ownerId = ownerUidParam; // claim legacy data for whoever opens it first after upgrading
     v.sharedWith = Array.isArray(v.sharedWith) ? v.sharedWith.filter(looksLikeUid) : [];
     v.payments = (v.payments||[]).map(p=>({ documents: [], ...p, status: p.status || 'paid' }));
     v.documents = v.documents || [];
     delete v.createdBy; delete v.visibility;
   });
   (s.otherExpenses||[]).forEach(e=>{
+    if(!e.ownerId) e.ownerId = ownerUidParam;
     e.sharedWith = Array.isArray(e.sharedWith) ? e.sharedWith.filter(looksLikeUid) : [];
     delete e.createdBy; delete e.visibility;
   });
@@ -129,6 +101,7 @@ function normalizeState(s, ownerUidParam){
     menu.sections.forEach(sec=>{ sec.id = sec.id || uid(); sec.name = sec.name || 'Menu'; sec.items = Array.isArray(sec.items) ? sec.items : []; sec.items.forEach(item=>{ item.id = item.id || uid(); item.name = item.name || ''; item.notes = item.notes || ''; }); });
   });
   s.settings.events.forEach(ev=>{
+    if(!ev.ownerId) ev.ownerId = ownerUidParam;
     ev.sharedWith = Array.isArray(ev.sharedWith) ? ev.sharedWith.filter(looksLikeUid) : [];
     if('audience' in ev) delete ev.audience;
     if(ev.isMainWedding === undefined) ev.isMainWedding = /wedding/i.test(ev.name) && !/reception|haldi|vidaai|vidai|sangeet/i.test(ev.name);
@@ -156,6 +129,7 @@ function normalizeState(s, ownerUidParam){
       bashorRaat: !!m.bashorRaat
     }));
     g.family.forEach(m=>{ m.events.forEach(id=>{ if(!m.eventStatus[id]) m.eventStatus[id] = 'pending'; }); });
+    if(!g.ownerId) g.ownerId = ownerUidParam; // claim legacy data for whoever opens it first after upgrading
     g.sharedWith = Array.isArray(g.sharedWith) ? g.sharedWith.filter(looksLikeUid) : [];
   });
   (s.tasks||[]).forEach(t=>{}); // tasks are shared as-is, nothing to migrate
@@ -225,41 +199,26 @@ onAuthStateChanged(auth, async (user)=>{
     const cached = loadLocalCache();
     if(cached){ state = cached; renderAll(); }
 
-    // Safe initial load: READ first. Opening the app must NEVER create or overwrite the wedding document.
-    // A remote empty document is treated as suspicious when this device still has a meaningful local copy.
+    // One-time direct read (NOT a live listener) to decide: does the shared document already exist?
+    // This is the key fix for data loss — we only ever create/seed the document here, exactly once,
+    // and never from inside the live listener below (a transient "not found" from a live listener
+    // must never be treated as "this document doesn't exist yet", or it will overwrite real data).
     try{
       const snap = await getDoc(weddingDocRef);
-      const cachedState = cached && hasUserData(cached) ? cached : loadRecoveryCache();
-
       if(snap.exists()){
-        const remoteState = normalizeState(deepMerge(structuredClone(DEFAULT_DATA), snap.data()), user.uid);
-        if(hasUserData(remoteState) || !cachedState){
-          state = remoteState;
-        }else{
-          // Protect a meaningful local dataset from an accidentally empty cloud document.
-          state = cachedState;
-          toast('Cloud data looks empty — protected your local data.');
-        }
-      }else if(cachedState){
-        // Do NOT automatically recreate the document. Keep the local copy visible until the user
-        // explicitly saves/restores it. This prevents a transient permission/network failure from
-        // becoming an irreversible overwrite.
-        state = cachedState;
-        toast('Cloud record not found — showing protected local data.');
-      }else{
-        state = structuredClone(DEFAULT_DATA);
+        state = normalizeState(deepMerge(structuredClone(DEFAULT_DATA), snap.data()), user.uid);
+      } else {
+        state = normalizeState(cached || structuredClone(DEFAULT_DATA), user.uid);
       }
-
-      // Directory enrichment is local-only during startup. It is persisted only by an explicit save.
       upsertDirectory(state, user);
       cacheLocally();
+      await setDoc(weddingDocRef, state); // persist migration/seed/directory update once, explicitly
       renderAll();
     }catch(err){
       console.error('Initial load failed', err);
-      const fallback = cached || loadRecoveryCache();
-      if(fallback){ state = fallback; cacheLocally(); renderAll(); toast('Could not verify cloud data — showing protected local data'); }
-      else toast('Could not load wedding data. Nothing was overwritten.');
+      if(cached) toast('Offline — showing last saved data');
     }
+
     if(unsubscribeSnapshot) unsubscribeSnapshot();
     unsubscribeSnapshot = onSnapshot(weddingDocRef, (snap)=>{
       if(!snap.exists()) return; // never auto-recreate here — see note above

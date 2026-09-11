@@ -117,7 +117,8 @@ function normalizeState(s, ownerUidParam){
       if(!Array.isArray(g.events)){
         newGuests.push({
           id: g.id || uid(), eventId: g.eventId, tag: (g.tag||'General').trim() || 'General',
-          name: g.name || 'Guest', adults: Number(g.adults)||1, invited: !!g.invited, bashorRaat: !!g.bashorRaat
+          name: g.name || 'Guest', adults: Number(g.adults)||1, invited: !!g.invited, bashorRaat: !!g.bashorRaat,
+          rsvp: g.rsvp || 'pending'
         });
         return;
       }
@@ -144,7 +145,7 @@ function normalizeState(s, ownerUidParam){
         if(peopleNames.length===0) return;
         newGuests.push({
           id: uid(), eventId, tag: (g.tag||'General').trim() || 'General',
-          name: peopleNames.join(' + '), adults: adultsCount, invited: true, bashorRaat: bashor
+          name: peopleNames.join(' + '), adults: adultsCount, invited: true, bashorRaat: bashor, rsvp: 'pending'
         });
       });
     });
@@ -155,6 +156,7 @@ function normalizeState(s, ownerUidParam){
       g.adults = Number(g.adults) || 1;
       g.invited = !!g.invited;
       g.bashorRaat = !!g.bashorRaat;
+      g.rsvp = g.rsvp || 'pending';
     });
   }
   return s;
@@ -299,6 +301,7 @@ function canSee(entity, uid){
 function visibleVendors(){ const me = myUid(); return state.vendors.filter(v=> canSee(v, me)); }
 function visibleExpenses(){ const me = myUid(); return state.otherExpenses.filter(e=> canSee(e, me)); }
 function visibleEvents(){ const me = myUid(); return (state.settings.events||[]).filter(e=> canSee(e, me)); }
+function eventById(id){ return (state.settings.events||[]).find(e=>e.id===id); }
 function visibleGuests(eventId){
   // A guest belongs to exactly one event's list; it's visible whenever that event is visible to you.
   const visibleEventIds = new Set(visibleEvents().map(e=>e.id));
@@ -1209,7 +1212,7 @@ function openGuestForm(guest){
   const isEdit = !!guest;
   const ev = activeGuestEvent();
   if(!isEdit && !ev){ toast('Add an event first'); return; }
-  guest = guest || { id: uid(), eventId: ev.id, tag:'General', name:'', adults:1, invited:false, bashorRaat:false };
+  guest = guest || { id: uid(), eventId: ev.id, tag:'General', name:'', adults:1, invited:false, bashorRaat:false, rsvp:'pending' };
   const guestEvent = eventById(guest.eventId) || ev;
   const existingTags = [...new Set(visibleGuests(guest.eventId).map(g=>g.tag||'General'))].sort((a,b)=>a.localeCompare(b));
 
@@ -1226,6 +1229,14 @@ function openGuestForm(guest){
     <div class="toggle-row">
       <div><div class="toggle-label">Invited</div><div class="toggle-sub">Has the invite been sent?</div></div>
       <label class="switch"><input type="checkbox" id="g_invited" ${guest.invited?'checked':''}><span class="track"></span></label>
+    </div>
+    <div class="field">
+      <label>RSVP status</label>
+      <select id="g_rsvp">
+        <option value="pending" ${(guest.rsvp||'pending')==='pending'?'selected':''}>Pending</option>
+        <option value="confirmed" ${guest.rsvp==='confirmed'?'selected':''}>Confirmed</option>
+        <option value="declined" ${guest.rsvp==='declined'?'selected':''}>Declined</option>
+      </select>
     </div>
     ${guestEvent && guestEvent.isMainWedding ? `
     <div class="toggle-row">
@@ -1250,6 +1261,7 @@ function openGuestForm(guest){
     guest.tag = document.getElementById('g_tag').value.trim() || 'General';
     guest.adults = Number(document.getElementById('g_adults').value) || 1;
     guest.invited = document.getElementById('g_invited').checked;
+    guest.rsvp = document.getElementById('g_rsvp').value;
     const bashorEl = document.getElementById('g_bashor');
     guest.bashorRaat = bashorEl ? bashorEl.checked : false;
     if(!isEdit) state.guests.push(guest);
@@ -1312,10 +1324,10 @@ function handleImportFile(e){
 function jsonToRows(parsed){
   const rows = [];
   if(Array.isArray(parsed)){
-    parsed.forEach(r=> rows.push({ tag: r.tag||r.Tags||'General', name: r.name||r.Name||'', adults: r.adults||r.Adults||1, invited: !!(r.invited||r.Invited) }));
+    parsed.forEach(r=> rows.push({ tag: r.tag||r.Tags||'General', name: r.name||r.Name||'', adults: r.adults||r.Adults||1, invited: !!(r.invited||r.Invited), bashorRaat: !!(r.bashorRaat||r.bashor||r.baashorStay) }));
   } else if(parsed && Array.isArray(parsed.tags)){
     parsed.tags.forEach(group=>{
-      (group.guests||[]).forEach(g=> rows.push({ tag: group.name||'General', name: g.name||'', adults: g.adults||1, invited: !!g.invited }));
+      (group.guests||[]).forEach(g=> rows.push({ tag: group.name||'General', name: g.name||'', adults: g.adults||1, invited: !!g.invited, bashorRaat: !!(g.bashorRaat||g.bashor||g.baashorStay) }));
     });
   }
   return rows;
@@ -1327,8 +1339,9 @@ function processImportRows(rows, alreadyNormalized){
     col = {
       tag: findColumn(headers, ['tags','tag','category','group','description tag']),
       name: findColumn(headers, ['name','guest name','full name']),
-      adults: findColumn(headers, ['adults','adult','headcount','no of adults','number of adults']),
-      invited: findColumn(headers, ['invited','invited?','invite sent','sent'])
+      adults: findColumn(headers, ['adults','adult','headcount','no of adults','number of adults','total attending','attending','total','count','pax','people']),
+      invited: findColumn(headers, ['invited','invited?','invite sent','sent']),
+      bashor: findColumn(headers, ['baashor stay','bashor stay','baashor raat','bashor raat','staying for baashor raat','staying for bashor raat'])
     };
     if(!col.name){ document.getElementById('importError').textContent = 'Could not find a "Name" column in that file.'; return; }
   }
@@ -1338,6 +1351,7 @@ function processImportRows(rows, alreadyNormalized){
   const toImport = [];
   let skippedBlank = 0, skippedDup = 0;
   let lastTag = 'General';
+  const truthy = (raw)=> /^(yes|y|true|1|✓|invited|confirmed)$/i.test(String(raw||'').trim());
 
   rows.forEach(row=>{
     const name = alreadyNormalized ? String(row.name||'').trim() : String(row[col.name]||'').trim();
@@ -1347,8 +1361,10 @@ function processImportRows(rows, alreadyNormalized){
     if(tag) lastTag = tag; else tag = lastTag; // carry forward, matching a grouped-spreadsheet export
     const adultsRaw = alreadyNormalized ? row.adults : (col.adults ? row[col.adults] : '');
     const invitedRaw = alreadyNormalized ? row.invited : (col.invited ? row[col.invited] : '');
-    const invited = alreadyNormalized ? !!invitedRaw : /^(yes|y|true|1|✓|invited)$/i.test(String(invitedRaw||'').trim());
-    toImport.push({ id: uid(), eventId: ev.id, tag: tag || 'General', name, adults: Number(adultsRaw)||1, invited, bashorRaat:false });
+    const bashorRaw = alreadyNormalized ? row.bashorRaat : (col.bashor ? row[col.bashor] : '');
+    const invited = alreadyNormalized ? !!invitedRaw : truthy(invitedRaw);
+    const bashorRaat = alreadyNormalized ? !!bashorRaw : truthy(bashorRaw);
+    toImport.push({ id: uid(), eventId: ev.id, tag: tag || 'General', name, adults: Number(adultsRaw)||1, invited, bashorRaat, rsvp: 'pending' });
     existingNames.add(name.toLowerCase());
   });
   renderImportPreview(toImport, skippedBlank, skippedDup);

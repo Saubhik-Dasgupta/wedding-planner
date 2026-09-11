@@ -129,13 +129,35 @@ Private by default — vendors you add are visible only to you until you explici
 
 ### 💌 Guests
 
-One shared master guest list — both of you see and edit the same guests (this part is intentionally not private, since you're planning together).
+Each event has its **own separate guest list** — Haldi, Wedding, Reception, etc. all keep independent lists, so the same person can be on one, some, or all of them, and (for example) each side of the family can keep their own Haldi list private if that's ever needed via that event's sharing setting. The one exception: **Wedding and Bashor Raat share one list** — there's no separate "Bashor Raat" event, it's just an extra toggle on a guest within the Wedding list.
 
-- **Multiple events per guest**: when adding or editing a guest, tap to select every event they're invited to (Haldi, Wedding, Reception, etc. — whatever you've set up in Settings). A guest can be invited to several functions at once.
-- **Per-event RSVP**: below the event chips, each selected event gets its own Pending / Confirmed / Declined toggle — so a guest can be confirmed for the Wedding but still pending for the Reception.
-- On the guest list, small colored dots show each event and its status at a glance — tap a dot directly to cycle it through Pending → Confirmed → Declined without opening the full form.
-- **Bashor Raat**: if a guest is invited to whichever event you've marked as "the main Wedding day" (set this in that event's settings), an extra "Staying for Bashor Raat?" toggle appears on their form.
-- **Import from Excel/CSV**: pick which event(s) the file is for first (multi-select), then choose your file. New names get added with those events; names that already exist in your list get that event *added* to their existing invitations instead of being skipped — so you can safely import your Wedding list first, then your Reception list, and guests on both just get both events attached.
+- **Switching lists**: at the top of the Guests tab, tap an event name to switch which list you're viewing/editing.
+- **Tags**: every guest belongs to a Tag (a group like "Family," "Baba's Invitee," "Abash Family" — whatever categories you use). The list shows guests grouped under their tag with a running headcount subtotal, and you can tap a tag's header to collapse or expand that group.
+- **Adding a guest**: Tag, Name (can be a combined name like "Shantanu + Wife" for one row covering multiple people), an Adults headcount, and an Invited toggle (whether the invite has been sent). If you're on the Wedding list, there's also a "Staying for Bashor Raat?" toggle.
+- **Quick toggle**: tap the "Invited / Not yet" badge directly on a guest's row to flip it without opening the form.
+- **Filter**: All / Invited / Not yet invited, for whichever list you're currently viewing.
+
+**Importing your existing guest list:**
+- **From Excel/CSV**: use column headers `Tags`, `Name`, `Adults` (also recognizes `Total Attending`, `Headcount`, `Pax`, etc.), and `Invited` (Tags is optional — if a row's Tags cell is blank, it's treated as continuing the same group as the row above it, which matches how a grouped spreadsheet usually exports). A `Baashor Stay` / `Bashor Raat` column is also recognized and imported automatically when present. Pick which event you're importing into first (the event tab you have selected), then choose your file.
+- **From Apple Numbers**: Numbers' own file format can't be read directly by a web app — there's no reliable way to parse it in-browser. Open your sheet in Numbers, then **File → Export To → Excel (or CSV)**, and import that exported file exactly as above. If your sheet uses Numbers' "Organize by Category" grouping (like the Tags column in your screenshot), the exported file should carry the category into every row automatically — if it doesn't, the blank-row carry-forward described above will still handle it.
+- **From JSON**: for a scripted or hand-built import, the app accepts:
+  ```json
+  {
+    "tags": [
+      { "name": "Abash Family", "guests": [
+        { "name": "Bachchan Da", "adults": 3, "invited": false },
+        { "name": "Sandip Da", "adults": 1, "invited": false }
+      ]},
+      { "name": "Baba's Invitee", "guests": [
+        { "name": "Amit Bhattacharjee", "adults": 2, "invited": false }
+      ]}
+    ]
+  }
+  ```
+  A flat array of `{"tag":"...", "name":"...", "adults":N, "invited":true|false}` objects also works.
+- **PDF isn't supported** — reliably pulling a table back out of a PDF in-browser isn't practical to do well; export to Excel/CSV/JSON instead.
+- Either way, guests that already exist by name in that event's list are skipped as duplicates rather than re-added.
+- A **Confirmed?** column, if your sheet has one, is currently not imported — the app only tracks Invited (sent) vs. not, not RSVP confirmation. Let your planner know if you'd like that added back as a separate tracked field.
 
 ## ⚙️ Settings
 
